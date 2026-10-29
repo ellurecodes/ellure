@@ -19,11 +19,11 @@ import {
   PiggyBank,
   Sparkles,
 } from 'lucide-react';
+import { useUserData } from '../../hooks/useUserData';
 
 export function GoalsPage() {
   const { success, toastWithUndo } = useToast();
-  const goals = useLiveQuery(() => db.goals.toArray()) || [];
-  const savingsGoals = useLiveQuery(() => db.savingsGoals.toArray()) || [];
+  const { currentUser, goals, savingsGoals } = useUserData();
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -62,6 +62,7 @@ export function GoalsPage() {
     const now = new Date().toISOString();
     const newG: Goal = {
       id: `g_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       title: goalTitle.trim(),
       category: goalCategory,
       targetDate: goalTargetDate,

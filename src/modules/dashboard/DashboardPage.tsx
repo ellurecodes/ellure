@@ -39,19 +39,23 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import { useUserData } from '../../hooks/useUserData';
 
 export function DashboardPage() {
-  const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-  const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-  const platforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const earningRecords = useLiveQuery(() => db.earningRecords.toArray()) || [];
-  const withdrawals = useLiveQuery(() => db.withdrawals.toArray()) || [];
-  const academicTasks = useLiveQuery(() => db.academicTasks.toArray()) || [];
-  const habits = useLiveQuery(() => db.habits.toArray()) || [];
-  const habitLogs = useLiveQuery(() => db.habitLogs.toArray()) || [];
-  const goals = useLiveQuery(() => db.goals.toArray()) || [];
-  const budgets = useLiveQuery(() => db.budgets.toArray()) || [];
-  const settings = useLiveQuery(() => db.settings.get('current_user_settings'));
+  const {
+    currentUser,
+    accounts,
+    transactions,
+    platforms,
+    earningRecords,
+    withdrawals,
+    academicTasks,
+    habits,
+    habitLogs,
+    goals,
+    budgets,
+    settings,
+  } = useUserData();
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const currentMonthStr = todayStr.slice(0, 7);

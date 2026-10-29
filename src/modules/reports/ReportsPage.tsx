@@ -18,6 +18,7 @@ import {
   YAxis,
   Tooltip,
 } from 'recharts';
+import { useUserData } from '../../hooks/useUserData';
 
 export function ReportsPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -25,15 +26,18 @@ export function ReportsPage() {
 
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr);
 
-  const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-  const earningRecords = useLiveQuery(() => db.earningRecords.toArray()) || [];
-  const withdrawals = useLiveQuery(() => db.withdrawals.toArray()) || [];
-  const platforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const budgets = useLiveQuery(() => db.budgets.toArray()) || [];
-  const academicTasks = useLiveQuery(() => db.academicTasks.toArray()) || [];
-  const goals = useLiveQuery(() => db.goals.toArray()) || [];
-  const habits = useLiveQuery(() => db.habits.toArray()) || [];
-  const habitLogs = useLiveQuery(() => db.habitLogs.toArray()) || [];
+  const {
+    currentUser,
+    transactions,
+    earningRecords,
+    withdrawals,
+    platforms,
+    budgets,
+    academicTasks,
+    goals,
+    habits,
+    habitLogs,
+  } = useUserData();
 
   // Month bounds
   const startDate = `${selectedMonth}-01`;

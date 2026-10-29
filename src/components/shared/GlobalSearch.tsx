@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, ArrowRight, DollarSign, Briefcase, BookOpen, Target, Calendar, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
 import { formatInr } from '../../domain/money';
+import { useUserData } from '../../hooks/useUserData';
 
 export interface GlobalSearchProps {
   isOpen: boolean;
@@ -26,10 +25,12 @@ export function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-  const platforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const tasks = useLiveQuery(() => db.academicTasks.toArray()) || [];
-  const goals = useLiveQuery(() => db.goals.toArray()) || [];
+  const {
+    transactions,
+    platforms,
+    academicTasks: tasks,
+    goals,
+  } = useUserData();
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

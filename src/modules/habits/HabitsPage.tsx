@@ -23,15 +23,19 @@ import {
   Trash2,
   Calendar,
 } from 'lucide-react';
+import { useUserData } from '../../hooks/useUserData';
 
 export function HabitsPage() {
   const { success, toastWithUndo } = useToast();
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  const habits = useLiveQuery(() => db.habits.toArray()) || [];
-  const habitLogs = useLiveQuery(() => db.habitLogs.toArray()) || [];
-  const metricLogs = useLiveQuery(() => db.fitnessMetricLogs.toArray()) || [];
-  const settings = useLiveQuery(() => db.settings.get('current_user_settings'));
+  const {
+    currentUser,
+    habits,
+    habitLogs,
+    fitnessMetricLogs: metricLogs,
+    settings,
+  } = useUserData();
 
   // Today's metric log
   const todayMetric = useMemo(() => {
@@ -65,6 +69,7 @@ export function HabitsPage() {
     } else {
       await db.habitLogs.add({
         id: `hl_${habitId}_${todayStr}`,
+        userId: currentUser?.id,
         habitId,
         date: todayStr,
         completed: true,
@@ -78,6 +83,7 @@ export function HabitsPage() {
     const now = new Date().toISOString();
     const newH: Habit = {
       id: `h_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       name: habitName.trim(),
       category: habitCategory,
       frequency: 'daily',
@@ -94,7 +100,7 @@ export function HabitsPage() {
 
   // Update daily wellness metric (water, sleep, steps, workout)
   const handleUpdateMetric = async (field: keyof FitnessMetricLog, value: number) => {
-    const current = { ...todayMetric, [field]: value };
+    const current = { ...todayMetric, userId: currentUser?.id, [field]: value };
     await db.fitnessMetricLogs.put(current);
   };
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard,
   Wallet,
@@ -19,6 +20,8 @@ import {
   Menu,
   ChevronLeft,
   ChevronRight,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 import { GlobalSearch } from '../shared/GlobalSearch';
 import { QuickAddModal } from '../shared/QuickAddModal';
@@ -28,6 +31,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 
 export function AppLayout() {
+  const { currentUser, logout } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
@@ -166,19 +170,52 @@ export function AppLayout() {
           })}
         </nav>
 
-        {/* Local Privacy Status */}
-        <div className="p-3 border-t border-border">
+        {/* User Profile & Sign Out on Sidebar */}
+        <div className="p-3 border-t border-border space-y-2">
           {!isSidebarCollapsed ? (
-            <div className="flex items-center space-x-2 text-[11px] text-muted-foreground bg-muted/40 p-2 rounded-lg">
-              <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+            <div className="flex items-center justify-between bg-muted/30 p-2 rounded-xl">
+              <div className="flex items-center space-x-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                  {currentUser?.displayName?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <div className="truncate">
+                  <span className="font-semibold text-xs block text-foreground truncate">
+                    {currentUser?.displayName}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground block -mt-0.5 font-mono truncate">
+                    @{currentUser?.username}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={logout}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={logout}
+              className="w-full flex items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title={`Signed in as @${currentUser?.username}. Click to Sign Out.`}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
+
+          {!isSidebarCollapsed ? (
+            <div className="flex items-center space-x-2 text-[11px] text-muted-foreground bg-muted/20 p-1.5 rounded-lg">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
               <div className="truncate">
-                <span className="font-semibold block text-foreground">Local Only</span>
-                <span className="text-[10px] block opacity-80">100% on device</span>
+                <span className="font-semibold block text-[10px] text-foreground">Local Only</span>
+                <span className="text-[9px] block opacity-80">100% on device</span>
               </div>
             </div>
           ) : (
             <div className="flex justify-center" title="Local Only • 100% on device">
-              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
             </div>
           )}
         </div>
@@ -244,6 +281,16 @@ export function AppLayout() {
               ) : (
                 <Sun className="w-4 h-4 text-amber-500" />
               )}
+            </button>
+
+            {/* Mobile Sign Out button */}
+            <button
+              onClick={logout}
+              className="md:hidden p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </header>

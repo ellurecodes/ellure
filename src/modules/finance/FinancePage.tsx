@@ -65,17 +65,21 @@ import {
   YAxis,
   CartesianGrid,
 } from 'recharts';
+import { useUserData } from '../../hooks/useUserData';
 
 export function FinancePage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'budgets' | 'loans' | 'recurring' | 'savings'>('overview');
   const { success, error, toastWithUndo } = useToast();
 
-  const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-  const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-  const budgets = useLiveQuery(() => db.budgets.toArray()) || [];
-  const savingsGoals = useLiveQuery(() => db.savingsGoals.toArray()) || [];
-  const recurringSchedules = useLiveQuery(() => db.recurringTransactions.toArray()) || [];
-  const settings = useLiveQuery(() => db.settings.get('current_user_settings'));
+  const {
+    currentUser,
+    accounts,
+    transactions,
+    budgets,
+    savingsGoals,
+    recurringTransactions: recurringSchedules,
+    settings,
+  } = useUserData();
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const currentMonthStr = todayStr.slice(0, 7);
@@ -164,6 +168,7 @@ export function FinancePage() {
     const now = new Date().toISOString();
     const newAcc: Account = {
       id: `acc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       name: newAccName.trim(),
       type: newAccType,
       currency: 'INR',
@@ -201,6 +206,7 @@ export function FinancePage() {
     const now = new Date().toISOString();
     const adjTx: AdjustmentTransaction = {
       id: `adj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       type: 'adjustment',
       date: todayStr,
       title: `Reconciliation Adjustment (${reconcileAccount.name})`,
@@ -264,6 +270,7 @@ export function FinancePage() {
 
     const loanTx: LoanTransaction = {
       id: `loan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       type: loanType,
       date: todayStr,
       title: titleMap[loanType] || `Loan with ${loanPerson.trim()}`,
@@ -303,6 +310,7 @@ export function FinancePage() {
     } else {
       const b: Budget = {
         id: `b_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        userId: currentUser?.id,
         category: budgetCategory,
         month: currentMonthStr,
         amountPaise,

@@ -23,14 +23,14 @@ import {
   ListTodo,
   Sparkles,
 } from 'lucide-react';
+import { useUserData } from '../../hooks/useUserData';
 
 export function AcademicsPage() {
   const [activeTab, setActiveTab] = useState<'tasks' | 'subjects' | 'planner'>('tasks');
   const [taskView, setTaskView] = useState<'today' | 'upcoming' | 'overdue' | 'all'>('today');
   const { success, error, toastWithUndo } = useToast();
 
-  const subjects = useLiveQuery(() => db.subjects.toArray()) || [];
-  const tasks = useLiveQuery(() => db.academicTasks.toArray()) || [];
+  const { currentUser, subjects, academicTasks: tasks } = useUserData();
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -95,19 +95,35 @@ export function AcademicsPage() {
 
   // Handle Create Task
   const handleCreateTask = async () => {
-    const targetSubjectId = taskSubjectId || subjects[0]?.id;
+    let targetSubjectId = taskSubjectId || subjects[0]?.id;
+    const now = new Date().toISOString();
+
     if (!targetSubjectId) {
-      error('Subject required', 'Please add a subject first.');
-      return;
+      // Auto-create default general subject so student task adding is never blocked
+      const fallbackSubId = `sub_core_${currentUser?.id || Date.now()}`;
+      await db.subjects.add({
+        id: fallbackSubId,
+        userId: currentUser?.id,
+        code: 'CORE101',
+        name: 'General Coursework',
+        instructor: 'Faculty',
+        credits: 3,
+        color: '#3b82f6',
+        isArchived: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      targetSubjectId = fallbackSubId;
     }
+
     if (!taskTitle.trim()) {
       error('Title required', 'Please provide a task title.');
       return;
     }
 
-    const now = new Date().toISOString();
     const newTask: AcademicTask = {
       id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       subjectId: targetSubjectId,
       title: taskTitle.trim(),
       type: taskType,
@@ -142,6 +158,7 @@ export function AcademicsPage() {
     const now = new Date().toISOString();
     const newSub: Subject = {
       id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       code: subCode.trim().toUpperCase(),
       name: subName.trim(),
       instructor: subInstructor.trim(),

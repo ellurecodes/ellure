@@ -28,10 +28,11 @@ import {
   Lock,
   CheckCircle2,
 } from 'lucide-react';
+import { useUserData } from '../../hooks/useUserData';
 
 export function SettingsPage() {
   const { success, error } = useToast();
-  const settings = useLiveQuery(() => db.settings.get('current_user_settings'));
+  const { currentUser, settings } = useUserData();
 
   // Persistence status
   const [persistenceState, setPersistenceState] = useState<{ isSupported: boolean; isPersisted: boolean }>({
@@ -44,7 +45,7 @@ export function SettingsPage() {
   }, []);
 
   // Student Settings Form
-  const [studentName, setStudentName] = useState(settings?.studentName || 'Student');
+  const [studentName, setStudentName] = useState(settings?.studentName || currentUser?.displayName || 'Student');
   const [allowanceAmount, setAllowanceAmount] = useState(
     ((settings?.monthlyAllowancePaise || 800000) / 100).toString()
   );
@@ -62,8 +63,53 @@ export function SettingsPage() {
 
   // Handle Save Student Settings
   const handleSaveStudentSettings = async () => {
-    if (!settings) return;
-    await db.settings.update(settings.id, {
+    if (!settings && !currentUser) return;
+    const settingsId = settings?.id || `settings_${currentUser?.id}`;
+    await db.settings.put({
+      ...(settings || {
+        id: settingsId,
+        userId: currentUser?.id,
+        theme: 'system',
+        currency: 'INR',
+        timezone: 'Asia/Kolkata',
+        dailySpendingLimitPaise: 0,
+        weeklyBudgetPaise: 0,
+        activeModules: {
+          fitnessAndHabits: true,
+          academics: true,
+          onlineEarnings: true,
+          loans: true,
+          goals: true,
+        },
+        fitnessToggles: {
+          water: true,
+          sleep: true,
+          workout: true,
+          steps: true,
+          weight: false,
+        },
+        widgetOrder: [
+          'balance_summary',
+          'cash_flow',
+          'budget_progress',
+          'earnings_glance',
+          'today_tasks',
+          'habit_tracker',
+          'goals_snapshot',
+          'recent_transactions',
+        ],
+        widgetVisibility: {
+          balance_summary: true,
+          cash_flow: true,
+          budget_progress: true,
+          earnings_glance: true,
+          today_tasks: true,
+          habit_tracker: true,
+          goals_snapshot: true,
+          recent_transactions: true,
+        },
+        hasSeenOnboarding: true,
+      }),
       studentName: studentName.trim(),
       monthlyAllowancePaise: Math.round(parseFloat(allowanceAmount || '0') * 100),
       allowanceResetDay: parseInt(allowanceResetDay) || 1,

@@ -55,18 +55,25 @@ import {
   YAxis,
   CartesianGrid,
 } from 'recharts';
+import { useUserData } from '../../hooks/useUserData';
 
 export function EarningsPage() {
   const [activeTab, setActiveTab] = useState<'summary' | 'platforms' | 'records' | 'withdrawals'>('summary');
   const { success, error, toastWithUndo } = useToast();
 
-  const platforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const records = useLiveQuery(() => db.earningRecords.toArray()) || [];
-  const withdrawals = useLiveQuery(() => db.withdrawals.toArray()) || [];
-  const payoutTransactions = useLiveQuery(() =>
-    db.transactions.where('type').equals('earning_payout').toArray()
-  ) as EarningPayoutTransaction[] || [];
-  const accounts = useLiveQuery(() => db.accounts.where('isArchived').equals(0).toArray()) || [];
+  const {
+    currentUser,
+    platforms,
+    earningRecords: records,
+    withdrawals,
+    transactions,
+    accounts: rawAccounts,
+  } = useUserData();
+
+  const accounts = rawAccounts.filter(a => !a.isArchived);
+  const payoutTransactions = useMemo(() => {
+    return transactions.filter(t => t.type === 'earning_payout') as EarningPayoutTransaction[];
+  }, [transactions]);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -132,6 +139,7 @@ export function EarningsPage() {
     const now = new Date().toISOString();
     const newPlatform: Platform = {
       id: `plat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       name: platName.trim(),
       websiteUrl: urlCheck.normalizedUrl!,
       category: platCategory,
@@ -204,6 +212,7 @@ export function EarningsPage() {
     const now = new Date().toISOString();
     const newWithdrawal: Withdrawal = {
       id: `w_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       platformId: platform.id,
       requestedDate: todayStr,
       amountPaise: requestedPaise,
@@ -251,6 +260,7 @@ export function EarningsPage() {
     const now = new Date().toISOString();
     const payoutTx: EarningPayoutTransaction = {
       id: `payout_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       type: 'earning_payout',
       date: todayStr,
       title: `${platform?.name || 'Platform'} Payout`,

@@ -4,6 +4,7 @@ import { Tabs } from '../ui/Tabs';
 import { Button } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
 import { useToast } from '../ui/Toast';
+import { useAuth } from '../../context/AuthContext';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { rupeesToPaise, convertForeignToInrPaise } from '../../domain/money';
@@ -32,11 +33,18 @@ export function QuickAddModal({
 }: QuickAddModalProps) {
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
   const { success, error } = useToast();
+  const { currentUser } = useAuth();
 
-  const accounts = useLiveQuery(() => db.accounts.where('isArchived').equals(0).toArray()) || [];
-  const platforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const subjects = useLiveQuery(() => db.subjects.where('isArchived').equals(0).toArray()) || [];
-  const existingTransactions = useLiveQuery(() => db.transactions.toArray()) || [];
+  const allAccounts = useLiveQuery(() => db.accounts.where('isArchived').equals(0).toArray()) || [];
+  const allPlatforms = useLiveQuery(() => db.platforms.toArray()) || [];
+  const allSubjects = useLiveQuery(() => db.subjects.where('isArchived').equals(0).toArray()) || [];
+  const allTransactions = useLiveQuery(() => db.transactions.toArray()) || [];
+
+  // Filter per logged in user
+  const accounts = allAccounts.filter(a => a.userId === currentUser?.id || (!a.userId && currentUser?.role === 'admin'));
+  const platforms = allPlatforms.filter(p => p.userId === currentUser?.id || (!p.userId && currentUser?.role === 'admin'));
+  const subjects = allSubjects.filter(s => s.userId === currentUser?.id || (!s.userId && currentUser?.role === 'admin'));
+  const existingTransactions = allTransactions.filter(t => t.userId === currentUser?.id || (!t.userId && currentUser?.role === 'admin'));
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -78,15 +86,29 @@ export function QuickAddModal({
   const [taskPriority, setTaskPriority] = useState<any>('medium');
   const [taskMinutes, setTaskMinutes] = useState('60');
 
+  // Ensure user has at least one account for recording money tasks
+  const ensureUserAccount = async (): Promise<string> => {
+    if (accounts.length > 0) return expenseAccountId || accounts[0].id;
+    const now = new Date().toISOString();
+    const newAcc = {
+      id: `acc_cash_${currentUser?.id || 'gen'}`,
+      userId: currentUser?.id,
+      name: 'Physical Cash',
+      type: 'cash' as const,
+      currency: 'INR',
+      openingBalancePaise: 0,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    await db.accounts.add(newAcc);
+    return newAcc.id;
+  };
+
   // Handle saving Expense
   const handleSaveExpense = async (forceSave = false) => {
     const amountPaise = rupeesToPaise(expenseAmount);
-    const targetAccountId = expenseAccountId || accounts[0]?.id;
-
-    if (!targetAccountId) {
-      error('No accounts available', 'Please create an account first.');
-      return;
-    }
+    const targetAccountId = await ensureUserAccount();
 
     if (!forceSave) {
       const dup = checkDuplicateTransaction(
@@ -102,6 +124,7 @@ export function QuickAddModal({
     const now = new Date().toISOString();
     const candidate = {
       id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       type: 'expense' as const,
       date: expenseDate,
       title: expenseTitle,
@@ -141,6 +164,7 @@ export function QuickAddModal({
 
     const candidate = {
       id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       type: 'transfer' as const,
       date: transferDate,
       title: `Transfer to ${accounts.find(a => a.id === transferToId)?.name || 'Account'}`,
@@ -174,14 +198,29 @@ export function QuickAddModal({
     const inrPaise = earningCurrency === 'INR' ? rawUnits : convertForeignToInrPaise(rawUnits, rate);
     const now = new Date().toISOString();
 
-    const targetPlatformId = earningPlatformId || platforms[0]?.id;
+    // If user has no platforms, auto-create a default platform cleanly
+    let targetPlatformId = earningPlatformId || platforms[0]?.id;
     if (!targetPlatformId) {
-      error('Platform required', 'Please add an earning platform first.');
-      return;
+      const defaultPlatform = {
+        id: `plat_${Date.now()}`,
+        userId: currentUser?.id,
+        name: 'Freelance & Online Work',
+        websiteUrl: 'https://freelance.in',
+        category: 'Freelancing',
+        defaultCurrency: 'INR',
+        withdrawalMinimumPaise: 0,
+        trustStatus: 'user_verified' as const,
+        withdrawableBalanceReportedPaise: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await db.platforms.add(defaultPlatform);
+      targetPlatformId = defaultPlatform.id;
     }
 
     const candidate: any = {
       id: `earn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       platformId: targetPlatformId,
       date: earningDate,
       title: earningTitle,
@@ -219,15 +258,29 @@ export function QuickAddModal({
 
   // Handle saving Academic Task
   const handleSaveTask = async () => {
-    const targetSubjectId = taskSubjectId || subjects[0]?.id;
+    const now = new Date().toISOString();
+
+    // If user has no subjects yet, auto-create a default course so task creation never fails
+    let targetSubjectId = taskSubjectId || subjects[0]?.id;
     if (!targetSubjectId) {
-      error('Subject required', 'Please add a subject first in Academics.');
-      return;
+      const defaultSub = {
+        id: `sub_gen_${Date.now()}`,
+        userId: currentUser?.id,
+        code: 'GEN101',
+        name: 'General Studies',
+        credits: 3,
+        color: '#3b82f6',
+        isArchived: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await db.subjects.add(defaultSub);
+      targetSubjectId = defaultSub.id;
     }
 
-    const now = new Date().toISOString();
     const candidate = {
       id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
       subjectId: targetSubjectId,
       title: taskTitle,
       type: taskType,
@@ -326,11 +379,15 @@ export function QuickAddModal({
               value={expenseAccountId || accounts[0]?.id || ''}
               onChange={e => setExpenseAccountId(e.target.value)}
             >
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.type})
-                </option>
-              ))}
+              {accounts.length === 0 ? (
+                <option value="">Default Cash Account (Will create)</option>
+              ) : (
+                accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.type})
+                  </option>
+                ))
+              )}
             </Select>
 
             <Select
@@ -386,7 +443,7 @@ export function QuickAddModal({
               onChange={e => setEarningPlatformId(e.target.value)}
             >
               {platforms.length === 0 ? (
-                <option value="">No platforms added yet</option>
+                <option value="">Default Freelance Platform (Auto-create)</option>
               ) : (
                 platforms.map(p => (
                   <option key={p.id} value={p.id}>
@@ -563,7 +620,7 @@ export function QuickAddModal({
               onChange={e => setTaskSubjectId(e.target.value)}
             >
               {subjects.length === 0 ? (
-                <option value="">No subjects added yet</option>
+                <option value="">Default General Coursework (Auto-create)</option>
               ) : (
                 subjects.map(s => (
                   <option key={s.id} value={s.id}>

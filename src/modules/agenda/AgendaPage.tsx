@@ -16,16 +16,20 @@ import {
   AlertCircle,
   Sparkles,
 } from 'lucide-react';
+import { useUserData } from '../../hooks/useUserData';
 
 export function AgendaPage() {
   const { success, toastWithUndo } = useToast();
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  const academicTasks = useLiveQuery(() => db.academicTasks.toArray()) || [];
-  const recurring = useLiveQuery(() => db.recurringTransactions.toArray()) || [];
-  const habits = useLiveQuery(() => db.habits.toArray()) || [];
-  const habitLogs = useLiveQuery(() => db.habitLogs.toArray()) || [];
-  const goals = useLiveQuery(() => db.goals.toArray()) || [];
+  const {
+    currentUser,
+    academicTasks,
+    recurringTransactions: recurring,
+    habits,
+    habitLogs,
+    goals,
+  } = useUserData();
 
   // 1. Today's Academic Tasks
   const todayTasks = useMemo(() => {
@@ -78,6 +82,7 @@ export function AgendaPage() {
     } else {
       await db.habitLogs.add({
         id: `hl_${habitId}_${todayStr}`,
+        userId: currentUser?.id,
         habitId,
         date: todayStr,
         completed: true,

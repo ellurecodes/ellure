@@ -14,6 +14,27 @@ export interface ForeignMoney {
 }
 
 // ==========================================
+// USER AUTHENTICATION & ROLES
+// ==========================================
+export const UserRoleEnum = z.enum(['admin', 'user']);
+export type UserRole = z.infer<typeof UserRoleEnum>;
+
+export const UserStatusEnum = z.enum(['pending', 'approved', 'rejected']);
+export type UserStatus = z.infer<typeof UserStatusEnum>;
+
+export const UserSchema = z.object({
+  id: z.string().min(1),
+  username: z.string().min(3, 'Username must be at least 3 characters'),
+  displayName: z.string().min(1, 'Display name is required'),
+  passwordHash: z.string().min(4, 'Password must be at least 4 characters'),
+  role: UserRoleEnum.default('user'),
+  status: UserStatusEnum.default('pending'),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type User = z.infer<typeof UserSchema>;
+
+// ==========================================
 // ACCOUNTS
 // ==========================================
 export const AccountTypeEnum = z.enum(['cash', 'bank', 'upi', 'wallet', 'other_digital']);
@@ -21,6 +42,7 @@ export type AccountType = z.infer<typeof AccountTypeEnum>;
 
 export const AccountSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   name: z.string().min(1, 'Account name is required'),
   type: AccountTypeEnum,
   currency: z.string().default('INR'),
@@ -55,6 +77,7 @@ export type TransactionType = z.infer<typeof TransactionTypeEnum>;
 
 const BaseTransactionSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
   title: z.string().min(1, 'Title is required'),
   notes: z.string().optional(),
@@ -163,6 +186,7 @@ export interface ScamChecklist {
 
 export const PlatformSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   name: z.string().min(1, 'Platform name is required'),
   websiteUrl: z.string().url().refine(url => url.startsWith('http://') || url.startsWith('https://'), {
     message: 'URL must start with http:// or https://',
@@ -199,6 +223,7 @@ export interface ClassificationAudit {
 
 export const EarningRecordSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   platformId: z.string().min(1, 'Platform is required'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
   title: z.string().min(1, 'Task or task title is required'),
@@ -238,6 +263,7 @@ export interface RecordAllocation {
 
 export const WithdrawalSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   platformId: z.string().min(1),
   requestedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   amountPaise: z.number().int().positive(),
@@ -257,6 +283,7 @@ export type Withdrawal = z.infer<typeof WithdrawalSchema>;
 // ==========================================
 export const BudgetSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   category: z.string().min(1), // 'total' or specific category name
   month: z.string().regex(/^\d{4}-\d{2}$/), // YYYY-MM
   amountPaise: z.number().int().positive('Budget amount must be positive'),
@@ -267,6 +294,7 @@ export type Budget = z.infer<typeof BudgetSchema>;
 
 export const SavingsGoalSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   title: z.string().min(1, 'Title is required'),
   targetPaise: z.number().int().positive('Target must be positive'),
   allocatedPaise: z.number().int().nonnegative().default(0),
@@ -276,7 +304,7 @@ export const SavingsGoalSchema = z.object({
   isCompleted: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
-  deletedAt: z.string().nullable().default(null),
+  deletedAt: z.string().nullable().optional(),
 });
 export type SavingsGoal = z.infer<typeof SavingsGoalSchema>;
 
@@ -288,6 +316,7 @@ export type RecurringSchedule = z.infer<typeof RecurringScheduleEnum>;
 
 export const RecurringTransactionSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   title: z.string().min(1),
   amountPaise: z.number().int().positive(),
   type: z.enum(['expense', 'income']),
@@ -310,6 +339,7 @@ export type RecurringTransaction = z.infer<typeof RecurringTransactionSchema>;
 // ==========================================
 export const SubjectSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   code: z.string().min(1, 'Course code is required'),
   name: z.string().min(1, 'Course name is required'),
   instructor: z.string().optional(),
@@ -330,6 +360,7 @@ export type TaskPriority = z.infer<typeof TaskPriorityEnum>;
 
 export const AcademicTaskSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   subjectId: z.string().min(1, 'Subject is required'),
   title: z.string().min(1, 'Title is required'),
   type: TaskTypeEnum,
@@ -350,6 +381,7 @@ export type AcademicTask = z.infer<typeof AcademicTaskSchema>;
 // ==========================================
 export const HabitSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   name: z.string().min(1, 'Habit name is required'),
   category: z.enum(['fitness', 'study', 'health', 'mindset', 'general']).default('general'),
   frequency: z.enum(['daily', 'weekdays', 'weekends']).default('daily'),
@@ -363,6 +395,7 @@ export type Habit = z.infer<typeof HabitSchema>;
 
 export const HabitLogSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   habitId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // YYYY-MM-DD
   completed: z.boolean(),
@@ -373,6 +406,7 @@ export type HabitLog = z.infer<typeof HabitLogSchema>;
 // Metric toggles for fitness & wellness
 export interface FitnessMetricLog {
   id: string;
+  userId?: string;
   date: string; // YYYY-MM-DD
   waterGlasses?: number;
   sleepHours?: number;
@@ -395,6 +429,7 @@ export interface GoalStep {
 
 export const GoalSchema = z.object({
   id: z.string().min(1),
+  userId: z.string().optional(),
   title: z.string().min(1, 'Goal title is required'),
   category: GoalCategoryEnum,
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -416,6 +451,7 @@ export type Goal = z.infer<typeof GoalSchema>;
 // ==========================================
 export interface UserSettings {
   id: string;
+  userId?: string;
   studentName: string;
   monthlyAllowancePaise: number;
   allowanceResetDay: number; // 1-31

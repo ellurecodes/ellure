@@ -8,14 +8,18 @@ import { EmptyState } from '../../components/shared/EmptyState';
 import { useToast } from '../../components/ui/Toast';
 import { Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { MoneyDisplay } from '../../components/shared/MoneyDisplay';
+import { useUserData } from '../../hooks/useUserData';
 
 export function TrashPage() {
   const { success, error } = useToast();
 
-  const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-  const platforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const tasks = useLiveQuery(() => db.academicTasks.toArray()) || [];
-  const goals = useLiveQuery(() => db.goals.toArray()) || [];
+  const {
+    currentUser,
+    transactions,
+    platforms,
+    academicTasks: tasks,
+    goals,
+  } = useUserData();
 
   const deletedTransactions = useMemo(() => transactions.filter(t => !!t.deletedAt), [transactions]);
   const deletedPlatforms = useMemo(() => platforms.filter(p => !!p.deletedAt), [platforms]);

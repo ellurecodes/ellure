@@ -76,74 +76,12 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 };
 
 /**
- * Ensures system settings and default empty accounts exist on first launch.
+ * Ensures system settings exist on first launch.
  */
 export async function initializeDatabaseDefaults(): Promise<void> {
   const existingSettings = await db.settings.get('current_user_settings');
   if (!existingSettings) {
     await db.settings.put(DEFAULT_USER_SETTINGS);
-  }
-
-  const accountsCount = await db.accounts.count();
-  if (accountsCount === 0) {
-    const now = new Date().toISOString();
-    const defaultAccounts: Account[] = [
-      {
-        id: 'acc_cash_wallet',
-        name: 'Physical Cash',
-        type: 'cash',
-        currency: 'INR',
-        openingBalancePaise: 50000, // ₹500
-        isExcludedFromSpendable: false,
-        isArchived: false,
-        color: '#10b981',
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      },
-      {
-        id: 'acc_bank_sbi',
-        name: 'SBI Student Account',
-        type: 'bank',
-        currency: 'INR',
-        openingBalancePaise: 350000, // ₹3,500
-        institutionName: 'State Bank of India',
-        isExcludedFromSpendable: false,
-        isArchived: false,
-        color: '#2563eb',
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      },
-      {
-        id: 'acc_upi_gpay',
-        name: 'Google Pay (UPI)',
-        type: 'upi',
-        currency: 'INR',
-        openingBalancePaise: 0,
-        isExcludedFromSpendable: false,
-        isArchived: false,
-        color: '#0ea5e9',
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      },
-      {
-        id: 'acc_emergency_fund',
-        name: 'Emergency Savings (Locked)',
-        type: 'bank',
-        currency: 'INR',
-        openingBalancePaise: 200000, // ₹2,000
-        isExcludedFromSpendable: true, // EXCLUDED from spendable money
-        isArchived: false,
-        color: '#8b5cf6',
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      },
-    ];
-
-    await db.accounts.bulkAdd(defaultAccounts);
   }
 }
 
