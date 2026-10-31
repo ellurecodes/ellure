@@ -11,6 +11,7 @@ import { Modal } from '../../components/ui/Modal';
 import { ConfirmModal } from '../../components/shared/ConfirmModal';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { useToast } from '../../components/ui/Toast';
+import { SUGGESTED_STUDENT_SUBJECTS } from '../../db/seed';
 import {
   GraduationCap,
   BookOpen,
@@ -177,6 +178,24 @@ export function AcademicsPage() {
     setSubInstructor('');
   };
 
+  const handleAddSuggestedSubjects = async () => {
+    const now = new Date().toISOString();
+    const newSubs: Subject[] = SUGGESTED_STUDENT_SUBJECTS.map((s, idx) => ({
+      id: `sub_${Date.now()}_${idx}`,
+      userId: currentUser?.id,
+      code: s.code,
+      name: s.name,
+      instructor: s.instructor,
+      credits: s.credits,
+      color: s.color,
+      isArchived: false,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    await db.subjects.bulkAdd(newSubs);
+    success('Courses Added', `Added ${newSubs.length} suggested student courses.`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -313,14 +332,38 @@ export function AcademicsPage() {
       {/* TAB 2: SUBJECTS / COURSES */}
       {activeTab === 'subjects' && (
         <div className="space-y-4 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Enrolled Courses</h3>
+              <p className="text-xs text-muted-foreground">Manage your semester subjects, faculty, and credit hours</p>
+            </div>
+            <Button size="sm" onClick={() => setIsAddSubjectOpen(true)}>
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              New Course
+            </Button>
+          </div>
+
           {subjects.length === 0 ? (
-            <EmptyState
-              icon={<GraduationCap className="w-6 h-6" />}
-              title="No courses registered"
-              description="Add your semester subjects to associate assignments, labs, and study plans."
-              actionLabel="Add First Course"
-              onAction={() => setIsAddSubjectOpen(true)}
-            />
+            <div className="space-y-4">
+              <EmptyState
+                icon={<GraduationCap className="w-6 h-6" />}
+                title="No courses registered"
+                description="Add your semester subjects to associate assignments, labs, and study plans."
+                actionLabel="Add First Course"
+                onAction={() => setIsAddSubjectOpen(true)}
+              />
+              <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Suggested Semester Courses</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Populate standard computer science / engineering courses (Data Structures, OS, Networks, Math) with one click.
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" onClick={handleAddSuggestedSubjects}>
+                  Add Suggested Courses
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {subjects.map(sub => {

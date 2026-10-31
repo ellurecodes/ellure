@@ -11,6 +11,8 @@ import { Modal } from '../../components/ui/Modal';
 import { ConfirmModal } from '../../components/shared/ConfirmModal';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { useToast } from '../../components/ui/Toast';
+import { SUGGESTED_STUDENT_HABITS } from '../../db/seed';
+import { Link } from 'react-router-dom';
 import {
   HeartPulse,
   Flame,
@@ -98,6 +100,23 @@ export function HabitsPage() {
     setHabitName('');
   };
 
+  const handleAddSuggestedHabits = async () => {
+    const now = new Date().toISOString();
+    const newHabits: Habit[] = SUGGESTED_STUDENT_HABITS.map((h, idx) => ({
+      id: `habit_${Date.now()}_${idx}`,
+      userId: currentUser?.id,
+      name: h.name,
+      category: h.category,
+      frequency: h.frequency,
+      color: h.color,
+      isArchived: false,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    await db.habits.bulkAdd(newHabits);
+    success('Habits Added', `Added ${newHabits.length} suggested student habits.`);
+  };
+
   // Update daily wellness metric (water, sleep, steps, workout)
   const handleUpdateMetric = async (field: keyof FitnessMetricLog, value: number) => {
     const current = { ...todayMetric, userId: currentUser?.id, [field]: value };
@@ -105,12 +124,13 @@ export function HabitsPage() {
   };
 
   const fitnessToggles = settings?.fitnessToggles || {
-    water: true,
-    sleep: true,
-    workout: true,
-    steps: true,
+    water: false,
+    sleep: false,
+    workout: false,
+    steps: false,
     weight: false,
   };
+  const hasAnyMetricEnabled = Object.values(fitnessToggles).some(Boolean);
 
   return (
     <div className="space-y-6">
@@ -128,9 +148,29 @@ export function HabitsPage() {
         </Button>
       </div>
 
+      {/* Daily Metrics Notice if all disabled */}
+      {!hasAnyMetricEnabled && (
+        <Card className="p-4 bg-muted/30 border-border">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-foreground">Fitness & Health Metrics are Disabled</p>
+              <p className="text-[11px] text-muted-foreground">
+                You can enable Water Intake, Sleep Tracking, Workout, Steps, and Weight in Settings.
+              </p>
+            </div>
+            <Link to="/settings">
+              <Button size="sm" variant="outline">
+                Configure in Settings
+              </Button>
+            </Link>
+          </div>
+        </Card>
+      )}
+
       {/* Daily Metrics Panel (Toggleable) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-        {fitnessToggles.water && (
+      {hasAnyMetricEnabled && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          {fitnessToggles.water && (
           <Card className="p-4 bg-sky-500/5 border-sky-500/20">
             <div className="flex items-center justify-between text-sky-600 mb-1.5">
               <span className="text-[11px] font-semibold uppercase">Water Intake</span>
@@ -250,19 +290,33 @@ export function HabitsPage() {
           </Card>
         )}
       </div>
+      )}
 
       {/* Habit Checklists with Streaks */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">Habit Checklists & Streaks</h3>
 
         {habits.length === 0 ? (
-          <EmptyState
-            icon={<Flame className="w-6 h-6" />}
-            title="No habits tracked"
-            description="Build consistent student habits like 2-hour deep study, reading, or morning workouts."
-            actionLabel="Add Habit"
-            onAction={() => setIsAddHabitOpen(true)}
-          />
+          <div className="space-y-4">
+            <EmptyState
+              icon={<Flame className="w-6 h-6" />}
+              title="No habits tracked"
+              description="Build consistent student habits like 2-hour deep study, reading, or morning workouts."
+              actionLabel="Add Habit"
+              onAction={() => setIsAddHabitOpen(true)}
+            />
+            <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground">Suggested Student Habits</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Add standard habits (Daily 2-hr Deep Study, Morning Workout, Daily Hydration) with one click.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" onClick={handleAddSuggestedHabits}>
+                Add Suggested Habits
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="space-y-2.5">
             {habits.map(h => {

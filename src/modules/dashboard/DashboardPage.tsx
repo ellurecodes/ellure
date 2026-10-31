@@ -1,14 +1,10 @@
 import React, { useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import {
   calculateDashboardBalances,
-  deriveAllAccountBalances,
 } from '../../domain/balances';
 import { calculateIncomeExpense } from '../../domain/transactions';
 import { calculateEarningsSummary } from '../../domain/earnings';
-import { evaluateBudgets, calculateAllowanceMetrics } from '../../domain/budgets';
-import { calculateHabitStreak } from '../../domain/habits';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -16,17 +12,16 @@ import { MoneyDisplay } from '../../components/shared/MoneyDisplay';
 import { Link } from 'react-router-dom';
 import {
   Wallet,
-  ArrowUpRight,
   ArrowDownLeft,
   Briefcase,
   BookOpen,
-  Flame,
-  Target,
-  Clock,
   Sparkles,
   ChevronRight,
-  PiggyBank,
   CheckCircle2,
+  Circle,
+  X,
+  Compass,
+  Plus,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -35,25 +30,21 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  PieChart,
-  Pie,
-  Cell,
 } from 'recharts';
 import { useUserData } from '../../hooks/useUserData';
 
 export function DashboardPage() {
   const {
-    currentUser,
     accounts,
     transactions,
     platforms,
     earningRecords,
     withdrawals,
+    subjects,
     academicTasks,
     habits,
     habitLogs,
     goals,
-    budgets,
     settings,
   } = useUserData();
 
@@ -77,19 +68,6 @@ export function DashboardPage() {
     return calculateEarningsSummary(earningRecords, withdrawals, payoutTransactions, platforms);
   }, [earningRecords, withdrawals, payoutTransactions, platforms]);
 
-  const budgetEval = useMemo(() => {
-    return evaluateBudgets(budgets, transactions, currentMonthStr);
-  }, [budgets, transactions, currentMonthStr]);
-
-  const allowance = useMemo(() => {
-    return calculateAllowanceMetrics(
-      settings?.monthlyAllowancePaise || 800000,
-      dashboardBalances.totalSpendablePaise,
-      new Date(),
-      settings?.allowanceResetDay || 1
-    );
-  }, [settings, dashboardBalances]);
-
   // Tasks due today
   const todayTasks = useMemo(() => {
     return academicTasks.filter(t => !t.deletedAt && t.dueDate === todayStr);
@@ -111,10 +89,59 @@ export function DashboardPage() {
   }, [transactions]);
 
   // Cash Flow Bar Chart Data
+  const hasCashFlowData = monthCashFlow.totalIncomePaise > 0 || monthCashFlow.totalExpensePaise > 0;
   const cashFlowChartData = [
     { name: 'Income', amount: monthCashFlow.totalIncomePaise / 100 },
     { name: 'Expense', amount: monthCashFlow.totalExpensePaise / 100 },
   ];
+
+  // Getting Started Onboarding Checklist Items (ticked off automatically from real data)
+  const checklistItems = [
+    {
+      id: 'acc',
+      label: 'Add your first account (Cash or UPI)',
+      completed: accounts.filter(a => !a.deletedAt).length > 0,
+      link: '/finance',
+      actionText: 'Add Account',
+    },
+    {
+      id: 'tx',
+      label: 'Record your first transaction',
+      completed: transactions.filter(t => !t.deletedAt).length > 0,
+      link: '/finance',
+      actionText: 'Add Transaction',
+    },
+    {
+      id: 'plat',
+      label: 'Add an earning platform (Freelance, gigs, etc.)',
+      completed: platforms.filter(p => !p.deletedAt).length > 0,
+      link: '/earnings',
+      actionText: 'Add Platform',
+    },
+    {
+      id: 'acad',
+      label: 'Add a semester course or academic task',
+      completed: subjects.filter(s => !s.isArchived).length > 0 || academicTasks.filter(t => !t.deletedAt).length > 0,
+      link: '/academics',
+      actionText: 'Add Course',
+    },
+    {
+      id: 'goal',
+      label: 'Create a student goal or milestone',
+      completed: goals.filter(g => !g.deletedAt).length > 0,
+      link: '/goals',
+      actionText: 'Create Goal',
+    },
+  ];
+
+  const completedChecklistCount = checklistItems.filter(i => i.completed).length;
+  const showOnboarding = settings?.showOnboardingChecklist !== false;
+
+  const handleDismissOnboarding = async () => {
+    if (settings) {
+      await db.settings.update(settings.id, { showOnboardingChecklist: false });
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -122,10 +149,10 @@ export function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground">
-            Welcome back, {settings?.studentName || 'Student'}
+            Welcome, {settings?.studentName || 'Student'}
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Student Command Dashboard • {allowance.daysRemaining} days left in cycle • Safe daily spend: ₹{(allowance.safeDailySpendPaise / 100).toFixed(0)}
+            Student Command Dashboard • Local-first, private personal command center
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -138,6 +165,67 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {/* Getting Started Onboarding Checklist (Requirement 7) */}
+      {showOnboarding && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Compass className="w-4 h-4 text-primary" />
+                <CardTitle className="text-sm font-semibold text-foreground">
+                  Getting Started with LifeOS
+                </CardTitle>
+                <Badge variant="outline" className="text-[10px]">
+                  {completedChecklistCount} of {checklistItems.length} completed
+                </Badge>
+              </div>
+              <button
+                onClick={handleDismissOnboarding}
+                className="text-muted-foreground hover:text-foreground text-xs flex items-center space-x-1 p-1 rounded-md transition-colors"
+                title="Hide checklist (can be re-enabled anytime in Settings)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <CardDescription className="text-xs">
+              Follow these simple steps to set up your personal productivity and finance command center. Everything ticks off automatically from your real data.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {checklistItems.map(item => (
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between p-2.5 rounded-lg border text-xs transition-colors ${
+                    item.completed
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-muted-foreground'
+                      : 'bg-card border-border text-foreground hover:border-primary/40'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    {item.completed ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <Circle className="w-4 h-4 text-muted-foreground shrink-0" />
+                    )}
+                    <span className={item.completed ? 'line-through text-muted-foreground' : 'font-medium'}>
+                      {item.label}
+                    </span>
+                  </div>
+                  {!item.completed && (
+                    <Link to={item.link}>
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px] text-primary hover:text-primary">
+                        {item.actionText} →
+                      </Button>
+                    </Link>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Hero Financial Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <Card className="p-4 bg-card">
@@ -146,9 +234,15 @@ export function DashboardPage() {
             <Wallet className="w-4 h-4 text-primary" />
           </div>
           <div className="text-xl font-bold text-foreground">
-            <MoneyDisplay paise={dashboardBalances.totalSpendablePaise} />
+            <MoneyDisplay paise={dashboardBalances.totalSpendablePaise} showPaise="always" />
           </div>
-          <p className="text-[10px] text-muted-foreground mt-1">Sum of spendable cash & digital accounts</p>
+          {accounts.filter(a => !a.deletedAt).length === 0 ? (
+            <Link to="/finance" className="text-[11px] text-primary hover:underline font-medium block mt-1">
+              Add your first account to get started →
+            </Link>
+          ) : (
+            <p className="text-[10px] text-muted-foreground mt-1">Sum of spendable cash & digital accounts</p>
+          )}
         </Card>
 
         <Card className="p-4 bg-card">
@@ -187,12 +281,12 @@ export function DashboardPage() {
 
       {/* Grid: Cash Flow Chart & Today's Agenda Glance */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Cash Flow vs Budget */}
+        {/* Cash Flow */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <div className="flex justify-between items-center">
               <div>
-                <CardTitle className="text-sm">Month Cash Flow & Budget</CardTitle>
+                <CardTitle className="text-sm">Month Cash Flow</CardTitle>
                 <CardDescription>Income vs spending comparison</CardDescription>
               </div>
               <Link to="/finance" className="text-xs text-primary hover:underline">
@@ -201,14 +295,29 @@ export function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cashFlowChartData}>
-                <XAxis dataKey="name" fontSize={11} />
-                <YAxis fontSize={11} tickFormatter={v => `₹${v}`} />
-                <Tooltip formatter={(v: any) => [`₹${v.toFixed(2)}`, 'Amount']} />
-                <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {!hasCashFlowData ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">No cash flow recorded this month yet.</p>
+                <p className="text-[11px] text-muted-foreground max-w-sm">
+                  Add your first income or expense transaction to see the monthly cash flow comparison.
+                </p>
+                <Link to="/finance">
+                  <Button size="sm" variant="outline" className="text-xs mt-1">
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Record First Transaction
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={cashFlowChartData}>
+                  <XAxis dataKey="name" fontSize={11} />
+                  <YAxis fontSize={11} tickFormatter={v => `₹${v}`} />
+                  <Tooltip formatter={(v: any) => [`₹${v.toFixed(2)}`, 'Amount']} />
+                  <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -231,7 +340,7 @@ export function DashboardPage() {
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Habits Completed Today</span>
                 <span className="font-bold tabular-nums">
-                  {habitCompletedCount} / {habits.length}
+                  {habits.length === 0 ? '0 (No habits)' : `${habitCompletedCount} / ${habits.length}`}
                 </span>
               </div>
             </div>
@@ -240,7 +349,12 @@ export function DashboardPage() {
             <div className="space-y-1.5">
               <span className="text-[11px] font-semibold text-muted-foreground uppercase">Submissions</span>
               {todayTasks.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic">No submissions due today.</p>
+                <div className="py-2 text-center">
+                  <p className="text-xs text-muted-foreground italic">No submissions due today.</p>
+                  <Link to="/academics" className="text-[11px] text-primary hover:underline block mt-1">
+                    Manage course tasks →
+                  </Link>
+                </div>
               ) : (
                 todayTasks.slice(0, 3).map(t => (
                   <div key={t.id} className="text-xs flex items-center justify-between p-1.5 rounded-lg bg-card border border-border">
@@ -266,7 +380,18 @@ export function DashboardPage() {
         </CardHeader>
         <CardContent>
           {recentTransactions.length === 0 ? (
-            <p className="text-xs text-muted-foreground py-4 text-center">No transactions recorded yet.</p>
+            <div className="py-6 text-center space-y-1">
+              <p className="text-xs text-muted-foreground font-medium">No transactions recorded yet.</p>
+              <p className="text-[11px] text-muted-foreground">
+                Your recent income, expenses, and transfers will be listed here.
+              </p>
+              <Link to="/finance" className="inline-block mt-2">
+                <Button size="sm" variant="outline" className="text-xs">
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Add First Transaction
+                </Button>
+              </Link>
+            </div>
           ) : (
             <div className="divide-y divide-border">
               {recentTransactions.map(tx => (

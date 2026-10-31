@@ -478,4 +478,6 @@ export interface UserSettings {
   widgetVisibility: Record<string, boolean>;
   lastBackupDate?: string;
   hasSeenOnboarding: boolean;
+  customCategories?: string[];
+  showOnboardingChecklist?: boolean;
 }

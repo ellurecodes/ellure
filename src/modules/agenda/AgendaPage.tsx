@@ -113,6 +113,15 @@ export function AgendaPage() {
         </div>
       </div>
 
+      {totalAgendaItems === 0 && (
+        <Card className="p-4 bg-muted/20 border-border text-center space-y-1.5">
+          <p className="text-xs font-semibold text-foreground">Your Daily Agenda is Clear</p>
+          <p className="text-[11px] text-muted-foreground">
+            No academic submissions, recurring bills, or habits are scheduled for today ({todayStr}).
+          </p>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* SECTION 1: ACADEMIC TASKS DUE TODAY */}
         <Card className="p-4 space-y-3">

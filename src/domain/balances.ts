@@ -138,11 +138,10 @@ export function calculateDashboardBalances(
         cashPaise += balance;
         break;
       case 'bank':
-        bankPaise += balance;
-        break;
       case 'upi':
       case 'other_digital':
         upiDigitalPaise += balance;
+        bankPaise += balance;
         break;
       case 'wallet':
         walletPaise += balance;

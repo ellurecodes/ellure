@@ -10,6 +10,7 @@ import { Modal } from '../../components/ui/Modal';
 import { ConfirmModal } from '../../components/shared/ConfirmModal';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { useToast } from '../../components/ui/Toast';
+import { SUGGESTED_STUDENT_GOALS } from '../../db/seed';
 import confetti from 'canvas-confetti';
 import {
   Target,
@@ -87,6 +88,31 @@ export function GoalsPage() {
     setGoalNotes('');
   };
 
+  const handleAddSuggestedGoals = async () => {
+    const now = new Date().toISOString();
+    const newGoals: Goal[] = SUGGESTED_STUDENT_GOALS.map((g, idx) => {
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + g.targetDays);
+      return {
+        id: `goal_${Date.now()}_${idx}`,
+        userId: currentUser?.id,
+        title: g.title,
+        category: g.category,
+        targetDate: targetDate.toISOString().slice(0, 10),
+        status: 'active',
+        progressPercent: 0,
+        measurableTarget: g.measurableTarget,
+        currentValue: g.currentValue,
+        steps: g.steps,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+    });
+    await db.goals.bulkAdd(newGoals);
+    success('Goals Added', `Added ${newGoals.length} suggested student goals.`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -104,13 +130,26 @@ export function GoalsPage() {
       </div>
 
       {goals.length === 0 ? (
-        <EmptyState
-          icon={<Target className="w-6 h-6" />}
-          title="No goals defined"
-          description="Set goals for CGPA targets, hackathon wins, student emergency fund, or internship preparation."
-          actionLabel="Define Goal"
-          onAction={() => setIsAddGoalOpen(true)}
-        />
+        <div className="space-y-4">
+          <EmptyState
+            icon={<Target className="w-6 h-6" />}
+            title="No goals defined"
+            description="Set goals for CGPA targets, hackathon wins, student emergency fund, or internship preparation."
+            actionLabel="Define Goal"
+            onAction={() => setIsAddGoalOpen(true)}
+          />
+          <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-foreground">Suggested Student Goals</p>
+              <p className="text-[11px] text-muted-foreground">
+                Add standard goals (CGPA 8.5+, Emergency Fund, Portfolio) with one click.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={handleAddSuggestedGoals}>
+              Add Suggested Goals
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {goals.filter(g => !g.deletedAt).map(goal => {

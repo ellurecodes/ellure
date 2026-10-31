@@ -61,112 +61,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, []);
 
-  // Initialize clean zero-balance accounts for a newly approved user
+  // Initialize user settings with sensible defaults if not present
   const initializeUserZeroData = async (user: User) => {
     if (user.role === 'admin') return;
 
-    const existingAccounts = await db.accounts.where('userId').equals(user.id).toArray();
-    if (existingAccounts.length === 0) {
-      const now = new Date().toISOString();
-      const defaultZeroAccounts: Account[] = [
-        {
-          id: `acc_cash_${user.id}`,
-          userId: user.id,
-          name: 'Physical Cash',
-          type: 'cash',
-          currency: 'INR',
-          openingBalancePaise: 0, // Zero balance
-          isExcludedFromSpendable: false,
-          isArchived: false,
-          color: '#10b981',
-          createdAt: now,
-          updatedAt: now,
-          deletedAt: null,
-        },
-        {
-          id: `acc_bank_${user.id}`,
-          userId: user.id,
-          name: 'Bank Account',
-          type: 'bank',
-          currency: 'INR',
-          openingBalancePaise: 0, // Zero balance
-          institutionName: 'Student Savings Account',
-          isExcludedFromSpendable: false,
-          isArchived: false,
-          color: '#2563eb',
-          createdAt: now,
-          updatedAt: now,
-          deletedAt: null,
-        },
-        {
-          id: `acc_upi_${user.id}`,
-          userId: user.id,
-          name: 'UPI / Digital Wallet',
-          type: 'upi',
-          currency: 'INR',
-          openingBalancePaise: 0, // Zero balance
-          isExcludedFromSpendable: false,
-          isArchived: false,
-          color: '#0ea5e9',
-          createdAt: now,
-          updatedAt: now,
-          deletedAt: null,
-        },
-      ];
-
-      await db.accounts.bulkAdd(defaultZeroAccounts);
-    }
-
-    // Initialize clean default course / subject if not present
-    const existingSubjects = await db.subjects.where('userId').equals(user.id).toArray();
-    if (existingSubjects.length === 0) {
-      const now = new Date().toISOString();
-      await db.subjects.add({
-        id: `sub_core_${user.id}`,
-        userId: user.id,
-        code: 'CORE101',
-        name: 'General Coursework',
-        instructor: 'Faculty',
-        credits: 3,
-        color: '#3b82f6',
-        isArchived: false,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-
-    // Initialize clean default platform if not present
-    const existingPlatforms = await db.platforms.where('userId').equals(user.id).toArray();
-    if (existingPlatforms.length === 0) {
-      const now = new Date().toISOString();
-      await db.platforms.add({
-        id: `plat_direct_${user.id}`,
-        userId: user.id,
-        name: 'Freelance & Direct Clients',
-        websiteUrl: 'https://freelance.local',
-        category: 'Freelancing',
-        defaultCurrency: 'INR',
-        withdrawalMinimumPaise: 0,
-        trustStatus: 'user_verified',
-        trustNotes: 'Personal direct client projects and campus gigs.',
-        scamChecklist: {
-          upfrontFeesDemanded: false,
-          unrealisticReturns: false,
-          noClearPayoutProof: false,
-          requestsSensitiveCredentials: false,
-          referralPyramidStructure: false,
-          noCompanyInformation: false,
-          risingWithdrawalMinimum: false,
-          unresponsiveSupport: false,
-        },
-        withdrawableBalanceReportedPaise: 0,
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      });
-    }
-
-    // Initialize user settings if not present
+    // Zero preset data: no default accounts, no default subjects, no default platforms.
+    // The database starts with zero user data records. Only user settings are initialized.
     const existingSettings = await db.settings.where('userId').equals(user.id).first();
     if (!existingSettings) {
       const defaultSettings: UserSettings = {
@@ -179,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         weeklyBudgetPaise: 0,
         theme: 'system',
         currency: 'INR',
-        timezone: 'Asia/Kolkata',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata',
         activeModules: {
           fitnessAndHabits: true,
           academics: true,
@@ -188,10 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           goals: true,
         },
         fitnessToggles: {
-          water: true,
-          sleep: true,
-          workout: true,
-          steps: true,
+          water: false,
+          sleep: false,
+          workout: false,
+          steps: false,
           weight: false,
         },
         widgetOrder: [
@@ -215,6 +115,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           recent_transactions: true,
         },
         hasSeenOnboarding: false,
+        customCategories: [],
+        showOnboardingChecklist: true,
       };
       await db.settings.put(defaultSettings);
     }

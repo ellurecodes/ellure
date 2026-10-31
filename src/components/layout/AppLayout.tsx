@@ -65,9 +65,9 @@ export function AppLayout() {
   // Global Ctrl+K handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
-        setIsSearchOpen(true);
+        setIsSearchOpen(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);

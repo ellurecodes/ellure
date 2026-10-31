@@ -4,13 +4,14 @@ import { db } from '../../db/db';
 import {
   Account,
   Transaction,
-  Budget,
   SavingsGoal,
   RecurringTransaction,
   LoanTransaction,
   AdjustmentTransaction,
   TransferTransaction,
+  EarningPayoutTransaction,
 } from '../../domain/types';
+import { revertRecordAllocations } from '../../domain/earnings';
 import {
   deriveAccountBalance,
   deriveAllAccountBalances,
@@ -22,8 +23,8 @@ import {
   groupExpensesByCategory,
 } from '../../domain/transactions';
 import { calculateLoansSummary, calculateNetWorth } from '../../domain/loans';
-import { evaluateBudgets, calculateAllowanceMetrics } from '../../domain/budgets';
 import { rupeesToPaise, paiseToRupees } from '../../domain/money';
+import { SUGGESTED_STUDENT_CATEGORIES } from '../../db/seed';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input, Select, Textarea } from '../../components/ui/Input';
@@ -36,14 +37,12 @@ import { MoneyDisplay } from '../../components/shared/MoneyDisplay';
 import { useToast } from '../../components/ui/Toast';
 import {
   Wallet,
-  Building2,
   Smartphone,
   Banknote,
   Plus,
   ArrowRightLeft,
   SlidersHorizontal,
   Clock,
-  PiggyBank,
   Users,
   Search,
   Filter,
@@ -68,14 +67,13 @@ import {
 import { useUserData } from '../../hooks/useUserData';
 
 export function FinancePage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'budgets' | 'loans' | 'recurring' | 'savings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'loans' | 'recurring' | 'savings'>('overview');
   const { success, error, toastWithUndo } = useToast();
 
   const {
     currentUser,
     accounts,
     transactions,
-    budgets,
     savingsGoals,
     recurringTransactions: recurringSchedules,
     settings,
@@ -90,15 +88,6 @@ export function FinancePage() {
   const loanTxs = useMemo(() => transactions.filter(t => t.type.startsWith('loan_')) as LoanTransaction[], [transactions]);
   const loansSummary = useMemo(() => calculateLoansSummary(loanTxs, todayStr), [loanTxs, todayStr]);
   const netWorth = useMemo(() => calculateNetWorth(dashboardBalances.totalLiquidPaise, loansSummary), [dashboardBalances, loansSummary]);
-  const budgetEvaluation = useMemo(() => evaluateBudgets(budgets, transactions, currentMonthStr), [budgets, transactions, currentMonthStr]);
-  const allowanceMetrics = useMemo(() => {
-    return calculateAllowanceMetrics(
-      settings?.monthlyAllowancePaise || 800000,
-      dashboardBalances.totalSpendablePaise,
-      new Date(),
-      settings?.allowanceResetDay || 1
-    );
-  }, [settings, dashboardBalances]);
 
   // Modal Dialogs
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
@@ -109,7 +98,7 @@ export function FinancePage() {
 
   // Account creation form
   const [newAccName, setNewAccName] = useState('');
-  const [newAccType, setNewAccType] = useState<any>('bank');
+  const [newAccType, setNewAccType] = useState<any>('upi');
   const [newAccOpening, setNewAccOpening] = useState('0');
   const [newAccExcludeSpendable, setNewAccExcludeSpendable] = useState(false);
 
@@ -121,11 +110,6 @@ export function FinancePage() {
   const [loanAccountId, setLoanAccountId] = useState('');
   const [loanDueDate, setLoanDueDate] = useState('');
   const [loanNotes, setLoanNotes] = useState('');
-
-  // Budget creation form
-  const [isAddBudgetOpen, setIsAddBudgetOpen] = useState(false);
-  const [budgetCategory, setBudgetCategory] = useState('Food & Canteen');
-  const [budgetAmount, setBudgetAmount] = useState('');
 
   // Delete transaction confirmation
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
@@ -236,7 +220,33 @@ export function FinancePage() {
   // Handle Soft Deletion of Transaction with Undo Toast
   const handleDeleteTransaction = async (tx: Transaction) => {
     const now = new Date().toISOString();
-    await db.transactions.update(tx.id, { deletedAt: now });
+
+    if (tx.type === 'earning_payout') {
+      const payoutTx = tx as EarningPayoutTransaction;
+      if (payoutTx.withdrawalId) {
+        const w = await db.withdrawals.get(payoutTx.withdrawalId);
+        if (w && w.allocations) {
+          const allRecords = await db.earningRecords.toArray();
+          const restored = revertRecordAllocations(
+            allRecords,
+            w.allocations.map(a => ({ earningRecordId: a.earningRecordId, amountPaise: a.allocatedPaise }))
+          );
+          await db.transaction('rw', [db.transactions, db.withdrawals, db.earningRecords], async () => {
+            await db.transactions.update(tx.id, { deletedAt: now });
+            await db.withdrawals.update(w.id, { status: 'requested', payoutTransactionId: undefined, updatedAt: now });
+            for (const r of restored) {
+              await db.earningRecords.put(r);
+            }
+          });
+        } else {
+          await db.transactions.update(tx.id, { deletedAt: now });
+        }
+      } else {
+        await db.transactions.update(tx.id, { deletedAt: now });
+      }
+    } else {
+      await db.transactions.update(tx.id, { deletedAt: now });
+    }
 
     toastWithUndo(`Deleted "${tx.title}"`, async () => {
       await db.transactions.update(tx.id, { deletedAt: null });
@@ -294,35 +304,12 @@ export function FinancePage() {
     setLoanNotes('');
   };
 
-  // Handle Saving Budget
-  const handleSaveBudget = async () => {
-    const amountPaise = rupeesToPaise(budgetAmount);
-    if (amountPaise <= 0) {
-      error('Invalid amount', 'Budget must be greater than zero.');
-      return;
-    }
-    const now = new Date().toISOString();
-    const existing = budgets.find(b => b.month === currentMonthStr && b.category === budgetCategory);
-
-    if (existing) {
-      await db.budgets.update(existing.id, { amountPaise, updatedAt: now });
-      success('Budget updated', `${budgetCategory} budget set to ₹${(amountPaise / 100).toFixed(2)}`);
-    } else {
-      const b: Budget = {
-        id: `b_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        userId: currentUser?.id,
-        category: budgetCategory,
-        month: currentMonthStr,
-        amountPaise,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await db.budgets.add(b);
-      success('Budget created', `${budgetCategory} budget set to ₹${(amountPaise / 100).toFixed(2)}`);
-    }
-
-    setIsAddBudgetOpen(false);
-    setBudgetAmount('');
+  const handleAddSuggestedCategories = async () => {
+    if (!settings) return;
+    const currentCats = settings.customCategories || [];
+    const merged = Array.from(new Set([...currentCats, ...SUGGESTED_STUDENT_CATEGORIES]));
+    await db.settings.update(settings.id, { customCategories: merged });
+    success('Categories Added', `Added ${SUGGESTED_STUDENT_CATEGORIES.length} suggested student categories.`);
   };
 
   const expenseCategories = useMemo(() => {
@@ -341,7 +328,7 @@ export function FinancePage() {
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground">Finance Command</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Strict double-entry ledger • Derived balances • Indian Student Allowance Tracker
+            Strict double-entry ledger • Derived balances • Personal Finance Tracker
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -363,7 +350,6 @@ export function FinancePage() {
         tabs={[
           { id: 'overview', label: 'Accounts & Net Worth', icon: <Wallet className="w-4 h-4" /> },
           { id: 'ledger', label: 'Transaction Ledger', icon: <SlidersHorizontal className="w-4 h-4" />, badge: filteredTransactions.length },
-          { id: 'budgets', label: 'Budgets & Allowance', icon: <PiggyBank className="w-4 h-4" /> },
           { id: 'loans', label: 'Loans & Repayments', icon: <Users className="w-4 h-4" />, badge: loansSummary.personSummaries.length },
           { id: 'recurring', label: 'Recurring & Bills', icon: <Clock className="w-4 h-4" />, badge: recurringSchedules.filter(r => r.isActive).length },
         ]}
@@ -373,7 +359,7 @@ export function FinancePage() {
       {activeTab === 'overview' && (
         <div className="space-y-6 animate-fade-in">
           {/* Dashboard Summary Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
             <Card className="bg-card">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between text-muted-foreground mb-1.5">
@@ -403,30 +389,17 @@ export function FinancePage() {
             <Card className="bg-card">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between text-muted-foreground mb-1.5">
-                  <span className="text-[11px] font-medium uppercase tracking-wider">Bank Balance</span>
-                  <Building2 className="w-4 h-4 text-blue-500" />
-                </div>
-                <div className="text-lg font-bold">
-                  <MoneyDisplay paise={dashboardBalances.bankPaise} />
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1">Savings accounts total</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between text-muted-foreground mb-1.5">
-                  <span className="text-[11px] font-medium uppercase tracking-wider">UPI & Digital</span>
+                  <span className="text-[11px] font-medium uppercase tracking-wider">UPI</span>
                   <Smartphone className="w-4 h-4 text-sky-500" />
                 </div>
                 <div className="text-lg font-bold">
                   <MoneyDisplay paise={dashboardBalances.upiDigitalPaise} />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1">GPay, PhonePe, Paytm</p>
+                <p className="text-[10px] text-muted-foreground mt-1">UPI & linked accounts</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-card col-span-2 lg:col-span-1">
+            <Card className="bg-card">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between text-muted-foreground mb-1.5">
                   <span className="text-[11px] font-medium uppercase tracking-wider">Net Worth</span>
@@ -451,61 +424,74 @@ export function FinancePage() {
               </div>
 
               <div className="space-y-2.5">
-                {accounts.filter(a => !a.deletedAt).map(acc => {
-                  const derivedBalance = balancesMap[acc.id] ?? 0;
-                  return (
-                    <div
-                      key={acc.id}
-                      className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-card hover:border-primary/40 transition-colors"
-                    >
-                      <div className="flex items-center space-x-3">
-                        <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
-                          {acc.type === 'bank' && <Building2 className="w-4 h-4 text-blue-500" />}
-                          {acc.type === 'cash' && <Banknote className="w-4 h-4 text-emerald-500" />}
-                          {acc.type === 'upi' && <Smartphone className="w-4 h-4 text-sky-500" />}
-                          {acc.type === 'wallet' && <Wallet className="w-4 h-4 text-amber-500" />}
-                          {acc.type === 'other_digital' && <Smartphone className="w-4 h-4 text-purple-500" />}
-                        </div>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-xs font-semibold text-foreground">{acc.name}</span>
-                            {acc.isExcludedFromSpendable && (
-                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                                Locked / Excluded
-                              </Badge>
-                            )}
+                {accounts.filter(a => !a.deletedAt).length === 0 ? (
+                  <EmptyState
+                    icon={<Wallet className="w-6 h-6" />}
+                    title="No accounts created yet"
+                    description="Add your first physical cash, UPI account, or digital wallet to start tracking spendable money."
+                    actionLabel="Add First Account"
+                    onAction={() => {
+                      setNewAccName('');
+                      setNewAccOpening('');
+                      setIsAddAccountOpen(true);
+                    }}
+                  />
+                ) : (
+                  accounts.filter(a => !a.deletedAt).map(acc => {
+                    const derivedBalance = balancesMap[acc.id] ?? 0;
+                    return (
+                      <div
+                        key={acc.id}
+                        className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-card hover:border-primary/40 transition-colors"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
+                            {acc.type === 'cash' && <Banknote className="w-4 h-4 text-emerald-500" />}
+                            {(acc.type === 'upi' || acc.type === 'bank') && <Smartphone className="w-4 h-4 text-sky-500" />}
+                            {acc.type === 'wallet' && <Wallet className="w-4 h-4 text-amber-500" />}
+                            {acc.type === 'other_digital' && <Smartphone className="w-4 h-4 text-purple-500" />}
                           </div>
-                          <span className="text-[11px] text-muted-foreground">
-                            Opening: ₹{(acc.openingBalancePaise / 100).toFixed(2)} • Type: {acc.type}
-                          </span>
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-xs font-semibold text-foreground">{acc.name}</span>
+                              {acc.isExcludedFromSpendable && (
+                                <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                  Locked / Excluded
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-muted-foreground">
+                              Opening: ₹{(acc.openingBalancePaise / 100).toFixed(2)} • Type: {acc.type === 'bank' ? 'upi' : acc.type}
+                            </span>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="flex items-center space-x-3">
-                        <div className="text-right">
-                          <MoneyDisplay
-                            paise={derivedBalance}
-                            className="text-sm font-bold block"
-                            colorScheme="neutral"
-                          />
-                          <span className="text-[10px] text-muted-foreground">Current Balance</span>
+                        <div className="flex items-center space-x-3">
+                          <div className="text-right">
+                            <MoneyDisplay
+                              paise={derivedBalance}
+                              className="text-sm font-bold block"
+                              colorScheme="neutral"
+                            />
+                            <span className="text-[10px] text-muted-foreground">Current Balance</span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setReconcileAccount(acc);
+                              setReconcileStatedAmount(paiseToRupees(derivedBalance).toFixed(2));
+                              setIsReconcileOpen(true);
+                            }}
+                            title="Manually reconcile and create adjustment entry"
+                          >
+                            Reconcile
+                          </Button>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setReconcileAccount(acc);
-                            setReconcileStatedAmount(paiseToRupees(derivedBalance).toFixed(2));
-                            setIsReconcileOpen(true);
-                          }}
-                          title="Manually reconcile and create adjustment entry"
-                        >
-                          Reconcile
-                        </Button>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
 
@@ -711,98 +697,22 @@ export function FinancePage() {
         </div>
       )}
 
-      {/* TAB 3: BUDGETS & ALLOWANCE */}
-      {activeTab === 'budgets' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Allowance Hero Card */}
-          <Card className="bg-gradient-to-br from-card to-muted/30 border-border">
-            <CardContent className="p-6">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                  <span className="text-xs font-semibold text-primary uppercase tracking-wider">
-                    Student Monthly Allowance Tracker
-                  </span>
-                  <div className="text-2xl font-bold text-foreground mt-1">
-                    <MoneyDisplay paise={settings?.monthlyAllowancePaise || 800000} />
-                    <span className="text-xs font-normal text-muted-foreground ml-2">/ month</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Cycle reset: Day {settings?.allowanceResetDay || 1} • {allowanceMetrics.daysRemaining} days remaining
-                  </p>
-                </div>
 
-                <div className="flex items-center space-x-6">
-                  <div className="text-right">
-                    <span className="text-xs text-muted-foreground block">Safe Daily Spend</span>
-                    <MoneyDisplay
-                      paise={allowanceMetrics.safeDailySpendPaise}
-                      className="text-lg font-bold text-emerald-600 dark:text-emerald-400"
-                    />
-                  </div>
-                  <Button size="sm" onClick={() => setIsAddBudgetOpen(true)}>
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Set Budget
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Budget Categories List */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-foreground">Current Month Budgets ({currentMonthStr})</h3>
-
-            {budgetEvaluation.categoryStatuses.length === 0 ? (
-              <EmptyState
-                icon={<PiggyBank className="w-6 h-6" />}
-                title="No category budgets set"
-                description="Set monthly spending limits for Canteen, Books, or Outings to avoid running out of money before month end."
-                actionLabel="Create First Budget"
-                onAction={() => setIsAddBudgetOpen(true)}
-              />
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {budgetEvaluation.categoryStatuses.map(b => (
-                  <Card key={b.category} className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs font-semibold text-foreground">{b.category}</span>
-                        {b.isOverBudget && <Badge variant="destructive">Exceeded</Badge>}
-                        {b.isNearLimit && <Badge variant="warning">80% Warning</Badge>}
-                      </div>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {b.percentageUsed}% used
-                      </span>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          b.isOverBudget
-                            ? 'bg-rose-500'
-                            : b.isNearLimit
-                            ? 'bg-amber-500'
-                            : 'bg-primary'
-                        }`}
-                        style={{ width: `${Math.min(100, b.percentageUsed)}%` }}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs mt-2.5 text-muted-foreground">
-                      <span>Spent: ₹{(b.actualSpentPaise / 100).toFixed(0)}</span>
-                      <span>Budget: ₹{(b.budgetPaise / 100).toFixed(0)}</span>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* TAB 4: LOANS & REPAYMENTS */}
       {activeTab === 'loans' && (
         <div className="space-y-4 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Loans & Peer Debts</h3>
+              <p className="text-xs text-muted-foreground">Classmate loans, borrowed funds & repayments (Counterparty money)</p>
+            </div>
+            <Button size="sm" onClick={() => { setLoanPerson(''); setLoanAmount(''); setIsAddLoanOpen(true); }}>
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Record Loan
+            </Button>
+          </div>
+
           {/* Loans Global Position Header */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             <Card className="p-4 bg-emerald-500/5 border-emerald-500/20">
@@ -931,7 +841,7 @@ export function FinancePage() {
         <div className="space-y-3.5">
           <Input
             label="Account Name"
-            placeholder="e.g. Canara Bank, Paytm Wallet, Cash Envelope"
+            placeholder="e.g. Canara Bank UPI, Paytm Wallet, Cash Envelope"
             value={newAccName}
             onChange={e => setNewAccName(e.target.value)}
           />
@@ -939,8 +849,7 @@ export function FinancePage() {
           <div className="grid grid-cols-2 gap-3">
             <Select label="Type" value={newAccType} onChange={e => setNewAccType(e.target.value as any)}>
               <option value="cash">Cash (Physical)</option>
-              <option value="bank">Bank Account</option>
-              <option value="upi">UPI ID</option>
+              <option value="upi">UPI</option>
               <option value="wallet">Digital Wallet</option>
               <option value="other_digital">Other Digital</option>
             </Select>
@@ -1023,7 +932,7 @@ export function FinancePage() {
 
             <Textarea
               label="Reconciliation Reason Note (Mandatory)"
-              placeholder="e.g. Unrecorded interest credited by bank, forgotten cash tip"
+              placeholder="e.g. Unrecorded interest, cashback, forgotten cash tip"
               value={reconcileReason}
               onChange={e => setReconcileReason(e.target.value)}
             />
@@ -1107,54 +1016,19 @@ export function FinancePage() {
         </div>
       </Modal>
 
-      {/* MODAL 4: SET BUDGET */}
-      <Modal isOpen={isAddBudgetOpen} onClose={() => setIsAddBudgetOpen(false)} title="Set Category Budget">
-        <div className="space-y-3.5">
-          <Select
-            label="Category"
-            value={budgetCategory}
-            onChange={e => setBudgetCategory(e.target.value)}
-          >
-            <option value="total">Overall Monthly Total Budget</option>
-            <option value="Food & Canteen">Food & Canteen</option>
-            <option value="Transport & Metro">Transport & Metro</option>
-            <option value="Hostel & Rent">Hostel & Rent</option>
-            <option value="Books & Stationery">Books & Stationery</option>
-            <option value="Recharge & Internet">Recharge & Internet</option>
-            <option value="Snacks & Chai">Snacks & Chai</option>
-            <option value="Entertainment">Entertainment</option>
-            <option value="Health & Personal Care">Health & Personal Care</option>
-            <option value="Subscriptions">Subscriptions</option>
-            <option value="Miscellaneous">Miscellaneous</option>
-          </Select>
 
-          <Input
-            label="Monthly Limit (₹)"
-            type="number"
-            step="1"
-            placeholder="e.g. 3000"
-            value={budgetAmount}
-            onChange={e => setBudgetAmount(e.target.value)}
-          />
-
-          <div className="pt-2 flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => setIsAddBudgetOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveBudget} disabled={!budgetAmount}>
-              Save Budget
-            </Button>
-          </div>
-        </div>
-      </Modal>
 
       {/* CONFIRM DELETE MODAL */}
       <ConfirmModal
         isOpen={!!deletingTx}
         onClose={() => setDeletingTx(null)}
         onConfirm={() => deletingTx && handleDeleteTransaction(deletingTx)}
-        title="Delete Transaction"
-        description={`Are you sure you want to delete "${deletingTx?.title}"? You will be able to restore it from Trash.`}
+        title={deletingTx?.type === 'earning_payout' ? 'Delete Earning Payout' : 'Delete Transaction'}
+        description={
+          deletingTx?.type === 'earning_payout'
+            ? `Warning: Deleting "${deletingTx.title}" will revert linked earning records back to pending status and debit this payout from your ledger. Are you sure you want to proceed?`
+            : `Are you sure you want to delete "${deletingTx?.title}"? You will be able to restore it from Trash.`
+        }
       />
     </div>
   );

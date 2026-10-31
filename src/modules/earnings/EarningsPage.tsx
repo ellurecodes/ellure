@@ -119,6 +119,19 @@ export function EarningsPage() {
   const [withAmount, setWithAmount] = useState('');
   const [withExpectedDate, setWithExpectedDate] = useState('');
 
+  // Earning Record Form State
+  const [recPlatformId, setRecPlatformId] = useState('');
+  const [recTitle, setRecTitle] = useState('');
+  const [recAmount, setRecAmount] = useState('');
+  const [recCurrency, setRecCurrency] = useState('INR');
+  const [recFxRate, setRecFxRate] = useState('1');
+  const [recClassification, setRecClassification] = useState<'verified' | 'uncertain'>('verified');
+  const [recConfidence, setRecConfidence] = useState<'low' | 'medium' | 'high'>('medium');
+  const [recReason, setRecReason] = useState('');
+  const [recReviewDate, setRecReviewDate] = useState(todayStr);
+  const [recEvidenceNote, setRecEvidenceNote] = useState('');
+  const [recDate, setRecDate] = useState(todayStr);
+
   // Payout Receipt Form State
   const [payoutAccountId, setPayoutAccountId] = useState('');
   const [payoutGrossAmount, setPayoutGrossAmount] = useState('');
@@ -169,9 +182,81 @@ export function EarningsPage() {
     setPlatWithdrawableReported('0');
   };
 
+  // Handle Add Earning Record
+  const handleSaveRecord = async () => {
+    if (!recTitle.trim()) {
+      error('Title required', 'Please describe this earning task or project.');
+      return;
+    }
+    const rawUnits = Math.round(parseFloat(recAmount || '0') * 100);
+    if (rawUnits <= 0) {
+      error('Invalid amount', 'Earning amount must be greater than zero.');
+      return;
+    }
+
+    const targetPlatId = recPlatformId || platforms[0]?.id;
+    if (!targetPlatId) {
+      error('Platform required', 'Please select or add an earning platform first.');
+      return;
+    }
+
+    if (recClassification === 'verified' && !recEvidenceNote.trim()) {
+      error('Evidence Note Required', 'Verified earnings require a reference note (screenshot, invoice #, receipt).');
+      return;
+    }
+
+    if (recClassification === 'uncertain' && !recReason.trim()) {
+      error('Reason Required', 'Uncertain earnings require an explanation for uncertainty.');
+      return;
+    }
+
+    const rate = parseFloat(recFxRate || '1');
+    const inrPaise = recCurrency === 'INR' ? rawUnits : convertForeignToInrPaise(rawUnits, rate);
+    const now = new Date().toISOString();
+
+    const newRecord: EarningRecord = {
+      id: `earn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: currentUser?.id,
+      platformId: targetPlatId,
+      date: recDate,
+      title: recTitle.trim(),
+      amountMinorUnits: rawUnits,
+      currency: recCurrency,
+      exchangeRateToInr: rate,
+      exchangeRateDate: recDate,
+      inrAmountPaise: inrPaise,
+      classification: recClassification,
+      confidenceLevel: recClassification === 'uncertain' ? recConfidence : undefined,
+      reasonForUncertainty: recClassification === 'uncertain' ? recReason.trim() : undefined,
+      reviewDate: recClassification === 'uncertain' ? recReviewDate : undefined,
+      evidenceNote: recClassification === 'verified' ? recEvidenceNote.trim() : undefined,
+      allocatedToWithdrawalPaise: 0,
+      auditTrail: [],
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    await db.earningRecords.add(newRecord);
+    success(
+      recClassification === 'verified' ? 'Verified Earning Added' : 'Uncertain Earning Added',
+      `${newRecord.title} recorded (₹${(inrPaise / 100).toFixed(2)})`
+    );
+    setIsAddRecordOpen(false);
+    resetRecordForm();
+  };
+
+  const resetRecordForm = () => {
+    setRecTitle('');
+    setRecAmount('');
+    setRecEvidenceNote('');
+    setRecReason('');
+    setRecFxRate('1');
+  };
+
   // Handle Request Withdrawal
   const handleRequestWithdrawal = async () => {
-    const platform = platforms.find(p => p.id === withPlatId);
+    const platform = platforms.find(p => p.id === (withPlatId || platforms[0]?.id));
     if (!platform) {
       error('Platform required', 'Please select a platform.');
       return;
@@ -616,11 +701,24 @@ export function EarningsPage() {
       {/* TAB 3: EARNING RECORDS */}
       {activeTab === 'records' && (
         <div className="space-y-4 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Logged Earning Records</h3>
+              <p className="text-xs text-muted-foreground">Classified earnings waiting for withdrawal or payout</p>
+            </div>
+            <Button size="sm" onClick={() => setIsAddRecordOpen(true)}>
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Add Earning Record
+            </Button>
+          </div>
+
           {records.length === 0 ? (
             <EmptyState
               icon={<DollarSign className="w-6 h-6" />}
               title="No earning records"
               description="Add earnings from tasks or freelance work. Classification into Verified or Uncertain is required."
+              actionLabel="Add Earning Record"
+              onAction={() => setIsAddRecordOpen(true)}
             />
           ) : (
             <div className="rounded-xl border border-border overflow-hidden bg-card">
@@ -1006,6 +1104,155 @@ export function EarningsPage() {
             </Button>
             <Button onClick={handleReclassify} disabled={!reclassReason.trim()}>
               Save Reclassification
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL 5: ADD EARNING RECORD */}
+      <Modal
+        isOpen={isAddRecordOpen}
+        onClose={() => setIsAddRecordOpen(false)}
+        title="Record Online Earning"
+        description="Choose Verified or Uncertain classification. Recorded earnings are tracked before withdrawal."
+        maxWidth="lg"
+      >
+        <div className="space-y-3.5">
+          <div className="grid grid-cols-2 gap-3">
+            <Select
+              label="Earning Platform"
+              value={recPlatformId || platforms[0]?.id || ''}
+              onChange={e => setRecPlatformId(e.target.value)}
+            >
+              {platforms.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+
+            <Input
+              label="Task / Project Title"
+              placeholder="e.g. Contract #123, Article Writing"
+              value={recTitle}
+              onChange={e => setRecTitle(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <Input
+              label="Amount"
+              type="number"
+              step="0.01"
+              placeholder="0.00"
+              value={recAmount}
+              onChange={e => setRecAmount(e.target.value)}
+            />
+
+            <Select label="Currency" value={recCurrency} onChange={e => setRecCurrency(e.target.value)}>
+              <option value="INR">INR (₹)</option>
+              <option value="USD">USD ($)</option>
+              <option value="EUR">EUR (€)</option>
+              <option value="GBP">GBP (£)</option>
+            </Select>
+
+            {recCurrency !== 'INR' ? (
+              <Input
+                label="Exchange Rate to INR"
+                type="number"
+                step="0.01"
+                placeholder="e.g. 83.50"
+                value={recFxRate}
+                onChange={e => setRecFxRate(e.target.value)}
+              />
+            ) : (
+              <Input label="Date" type="date" value={recDate} onChange={e => setRecDate(e.target.value)} />
+            )}
+          </div>
+
+          {/* Classification Selection */}
+          <div className="p-3 bg-muted/40 border border-border rounded-xl space-y-2">
+            <label className="block text-xs font-semibold text-foreground">
+              Classification (Mandatory)
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRecClassification('verified')}
+                className={`p-2.5 rounded-lg border text-left text-xs transition-all ${
+                  recClassification === 'verified'
+                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-semibold shadow-xs'
+                    : 'border-border bg-card text-muted-foreground'
+                }`}
+              >
+                <span className="block font-bold">1. Verified Earning</span>
+                <span className="text-[10px] block opacity-80 mt-0.5">Hold proof / invoice / direct receipt</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRecClassification('uncertain')}
+                className={`p-2.5 rounded-lg border text-left text-xs transition-all ${
+                  recClassification === 'uncertain'
+                    ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-semibold shadow-xs'
+                    : 'border-border bg-card text-muted-foreground'
+                }`}
+              >
+                <span className="block font-bold">2. Uncertain Earning</span>
+                <span className="text-[10px] block opacity-80 mt-0.5">Pending review / estimated balance</span>
+              </button>
+            </div>
+
+            {/* Verified Fields */}
+            {recClassification === 'verified' && (
+              <div className="pt-2">
+                <Input
+                  label="Evidence Note (Required for Verified)"
+                  placeholder="Invoice #, contract completion screenshot note"
+                  value={recEvidenceNote}
+                  onChange={e => setRecEvidenceNote(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* Uncertain Fields */}
+            {recClassification === 'uncertain' && (
+              <div className="pt-2 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <Select
+                    label="Confidence Level"
+                    value={recConfidence}
+                    onChange={e => setRecConfidence(e.target.value as any)}
+                  >
+                    <option value="low">Low Confidence</option>
+                    <option value="medium">Medium Confidence</option>
+                    <option value="high">High Confidence</option>
+                  </Select>
+
+                  <Input
+                    label="Review Date"
+                    type="date"
+                    value={recReviewDate}
+                    onChange={e => setRecReviewDate(e.target.value)}
+                  />
+                </div>
+
+                <Input
+                  label="Reason for Uncertainty (Required)"
+                  placeholder="e.g. Client review pending, platform clearance hold"
+                  value={recReason}
+                  onChange={e => setRecReason(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => setIsAddRecordOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveRecord} disabled={!recAmount || !recTitle.trim()}>
+              Save Record
             </Button>
           </div>
         </div>

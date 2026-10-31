@@ -18,9 +18,14 @@ import { SettingsPage } from './modules/settings/SettingsPage';
 import { TrashPage } from './modules/trash/TrashPage';
 import { db } from './db/db';
 import { generateDueRecurringTransactions } from './domain/recurring';
+import { checkAndRequestStoragePersistence } from './db/backup';
 
 function AppContent() {
   const { currentUser, isLoading } = useAuth();
+
+  useEffect(() => {
+    checkAndRequestStoragePersistence().catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function checkRecurring() {

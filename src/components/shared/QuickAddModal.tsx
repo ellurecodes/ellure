@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Modal } from '../ui/Modal';
 import { Tabs } from '../ui/Tabs';
 import { Button } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../context/AuthContext';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useUserData } from '../../hooks/useUserData';
 import { db } from '../../db/db';
 import { rupeesToPaise, convertForeignToInrPaise } from '../../domain/money';
 import { checkDuplicateTransaction } from '../../domain/transactions';
@@ -34,17 +34,16 @@ export function QuickAddModal({
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
   const { success, error } = useToast();
   const { currentUser } = useAuth();
+  const {
+    accounts: liveAccounts,
+    platforms,
+    subjects: liveSubjects,
+    transactions: existingTransactions,
+    settings,
+  } = useUserData();
 
-  const allAccounts = useLiveQuery(() => db.accounts.where('isArchived').equals(0).toArray()) || [];
-  const allPlatforms = useLiveQuery(() => db.platforms.toArray()) || [];
-  const allSubjects = useLiveQuery(() => db.subjects.where('isArchived').equals(0).toArray()) || [];
-  const allTransactions = useLiveQuery(() => db.transactions.toArray()) || [];
-
-  // Filter per logged in user
-  const accounts = allAccounts.filter(a => a.userId === currentUser?.id || (!a.userId && currentUser?.role === 'admin'));
-  const platforms = allPlatforms.filter(p => p.userId === currentUser?.id || (!p.userId && currentUser?.role === 'admin'));
-  const subjects = allSubjects.filter(s => s.userId === currentUser?.id || (!s.userId && currentUser?.role === 'admin'));
-  const existingTransactions = allTransactions.filter(t => t.userId === currentUser?.id || (!t.userId && currentUser?.role === 'admin'));
+  const accounts = liveAccounts.filter(a => !a.isArchived);
+  const subjects = liveSubjects.filter(s => !s.isArchived);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -86,29 +85,23 @@ export function QuickAddModal({
   const [taskPriority, setTaskPriority] = useState<any>('medium');
   const [taskMinutes, setTaskMinutes] = useState('60');
 
-  // Ensure user has at least one account for recording money tasks
-  const ensureUserAccount = async (): Promise<string> => {
-    if (accounts.length > 0) return expenseAccountId || accounts[0].id;
-    const now = new Date().toISOString();
-    const newAcc = {
-      id: `acc_cash_${currentUser?.id || 'gen'}`,
-      userId: currentUser?.id,
-      name: 'Physical Cash',
-      type: 'cash' as const,
-      currency: 'INR',
-      openingBalancePaise: 0,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    };
-    await db.accounts.add(newAcc);
-    return newAcc.id;
-  };
+  // Available categories from user settings, falling back to clean suggestions
+  const availableCategories = useMemo(() => {
+    if (settings?.customCategories && settings.customCategories.length > 0) {
+      return settings.customCategories;
+    }
+    return ['General', 'Food & Canteen', 'Books & Stationery', 'Transport & Metro', 'Miscellaneous'];
+  }, [settings?.customCategories]);
 
   // Handle saving Expense
   const handleSaveExpense = async (forceSave = false) => {
+    const targetAccountId = expenseAccountId || accounts[0]?.id;
+    if (!targetAccountId) {
+      error('Account required', 'Please add an account in Finance first before recording an expense.');
+      return;
+    }
+
     const amountPaise = rupeesToPaise(expenseAmount);
-    const targetAccountId = await ensureUserAccount();
 
     if (!forceSave) {
       const dup = checkDuplicateTransaction(
@@ -130,7 +123,7 @@ export function QuickAddModal({
       title: expenseTitle,
       accountId: targetAccountId,
       amountPaise,
-      category: expenseCategory,
+      category: expenseCategory || availableCategories[0],
       notes: expenseNotes,
       tags: [],
       createdAt: now,
@@ -153,7 +146,10 @@ export function QuickAddModal({
 
   // Handle saving Transfer
   const handleSaveTransfer = async () => {
-    if (transferFromId === transferToId) {
+    const effectiveFromId = transferFromId || accounts[0]?.id;
+    const effectiveToId = transferToId || (accounts.length > 1 ? accounts[1]?.id : accounts[0]?.id);
+
+    if (!effectiveFromId || !effectiveToId || effectiveFromId === effectiveToId) {
       error('Invalid transfer', 'Source and destination accounts must be different');
       return;
     }
@@ -167,9 +163,9 @@ export function QuickAddModal({
       userId: currentUser?.id,
       type: 'transfer' as const,
       date: transferDate,
-      title: `Transfer to ${accounts.find(a => a.id === transferToId)?.name || 'Account'}`,
-      fromAccountId: transferFromId,
-      toAccountId: transferToId,
+      title: `Transfer to ${accounts.find(a => a.id === effectiveToId)?.name || 'Account'}`,
+      fromAccountId: effectiveFromId,
+      toAccountId: effectiveToId,
       amountPaise,
       feePaise,
       notes: transferNotes,
@@ -193,30 +189,16 @@ export function QuickAddModal({
 
   // Handle saving Earning Record
   const handleSaveEarning = async () => {
+    const targetPlatformId = earningPlatformId || platforms[0]?.id;
+    if (!targetPlatformId) {
+      error('Platform required', 'Please add an earning platform first before recording earnings.');
+      return;
+    }
+
     const rawUnits = Math.round(parseFloat(earningAmount || '0') * 100);
     const rate = parseFloat(earningFxRate || '1');
     const inrPaise = earningCurrency === 'INR' ? rawUnits : convertForeignToInrPaise(rawUnits, rate);
     const now = new Date().toISOString();
-
-    // If user has no platforms, auto-create a default platform cleanly
-    let targetPlatformId = earningPlatformId || platforms[0]?.id;
-    if (!targetPlatformId) {
-      const defaultPlatform = {
-        id: `plat_${Date.now()}`,
-        userId: currentUser?.id,
-        name: 'Freelance & Online Work',
-        websiteUrl: 'https://freelance.in',
-        category: 'Freelancing',
-        defaultCurrency: 'INR',
-        withdrawalMinimumPaise: 0,
-        trustStatus: 'user_verified' as const,
-        withdrawableBalanceReportedPaise: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await db.platforms.add(defaultPlatform);
-      targetPlatformId = defaultPlatform.id;
-    }
 
     const candidate: any = {
       id: `earn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -258,26 +240,13 @@ export function QuickAddModal({
 
   // Handle saving Academic Task
   const handleSaveTask = async () => {
-    const now = new Date().toISOString();
-
-    // If user has no subjects yet, auto-create a default course so task creation never fails
-    let targetSubjectId = taskSubjectId || subjects[0]?.id;
+    const targetSubjectId = taskSubjectId || subjects[0]?.id;
     if (!targetSubjectId) {
-      const defaultSub = {
-        id: `sub_gen_${Date.now()}`,
-        userId: currentUser?.id,
-        code: 'GEN101',
-        name: 'General Studies',
-        credits: 3,
-        color: '#3b82f6',
-        isArchived: false,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await db.subjects.add(defaultSub);
-      targetSubjectId = defaultSub.id;
+      error('Course required', 'Please add a course first in Academics before creating a task.');
+      return;
     }
 
+    const now = new Date().toISOString();
     const candidate = {
       id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       userId: currentUser?.id,
@@ -380,7 +349,7 @@ export function QuickAddModal({
               onChange={e => setExpenseAccountId(e.target.value)}
             >
               {accounts.length === 0 ? (
-                <option value="">Default Cash Account (Will create)</option>
+                <option value="">No accounts available</option>
               ) : (
                 accounts.map(a => (
                   <option key={a.id} value={a.id}>
@@ -392,19 +361,14 @@ export function QuickAddModal({
 
             <Select
               label="Category"
-              value={expenseCategory}
+              value={expenseCategory || availableCategories[0]}
               onChange={e => setExpenseCategory(e.target.value)}
             >
-              <option value="Food & Canteen">Food & Canteen</option>
-              <option value="Transport & Metro">Transport & Metro</option>
-              <option value="Hostel & Rent">Hostel & Rent</option>
-              <option value="Books & Stationery">Books & Stationery</option>
-              <option value="Recharge & Internet">Recharge & Internet</option>
-              <option value="Snacks & Chai">Snacks & Chai</option>
-              <option value="Entertainment">Entertainment</option>
-              <option value="Health & Personal Care">Health & Personal Care</option>
-              <option value="Subscriptions">Subscriptions</option>
-              <option value="Miscellaneous">Miscellaneous</option>
+              {availableCategories.map((cat: string) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
             </Select>
 
             <Input
@@ -426,7 +390,10 @@ export function QuickAddModal({
             <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={() => handleSaveExpense(false)} disabled={!expenseTitle || !expenseAmount}>
+            <Button
+              onClick={() => handleSaveExpense(false)}
+              disabled={!expenseTitle || !expenseAmount || accounts.length === 0}
+            >
               Record Expense
             </Button>
           </div>
@@ -436,6 +403,12 @@ export function QuickAddModal({
       {/* TAB 2: ONLINE EARNING RECORD */}
       {activeTab === 'earning' && (
         <div className="space-y-3.5">
+          {platforms.length === 0 && (
+            <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+              No earning platforms registered. Please add a platform first in Online Earnings.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Select
               label="Platform"
@@ -443,7 +416,7 @@ export function QuickAddModal({
               onChange={e => setEarningPlatformId(e.target.value)}
             >
               {platforms.length === 0 ? (
-                <option value="">Default Freelance Platform (Auto-create)</option>
+                <option value="">No platforms available</option>
               ) : (
                 platforms.map(p => (
                   <option key={p.id} value={p.id}>
@@ -613,6 +586,12 @@ export function QuickAddModal({
       {/* TAB 3: ACADEMIC TASK */}
       {activeTab === 'task' && (
         <div className="space-y-3.5">
+          {subjects.length === 0 && (
+            <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+              No courses registered. Please add a course first in Academics.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Select
               label="Subject / Course"
@@ -620,7 +599,7 @@ export function QuickAddModal({
               onChange={e => setTaskSubjectId(e.target.value)}
             >
               {subjects.length === 0 ? (
-                <option value="">Default General Coursework (Auto-create)</option>
+                <option value="">No courses available</option>
               ) : (
                 subjects.map(s => (
                   <option key={s.id} value={s.id}>
@@ -678,7 +657,7 @@ export function QuickAddModal({
             <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={handleSaveTask} disabled={!taskTitle}>
+            <Button onClick={handleSaveTask} disabled={!taskTitle || subjects.length === 0}>
               Create Task
             </Button>
           </div>
@@ -688,17 +667,27 @@ export function QuickAddModal({
       {/* TAB 4: TRANSFER */}
       {activeTab === 'transfer' && (
         <div className="space-y-3.5">
+          {accounts.length < 2 && (
+            <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+              Transfers require at least two accounts. Please create additional accounts in Finance first.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Select
               label="From Account"
               value={transferFromId || accounts[0]?.id || ''}
               onChange={e => setTransferFromId(e.target.value)}
             >
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.type})
-                </option>
-              ))}
+              {accounts.length === 0 ? (
+                <option value="">No accounts available</option>
+              ) : (
+                accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.type})
+                  </option>
+                ))
+              )}
             </Select>
 
             <Select
@@ -706,11 +695,15 @@ export function QuickAddModal({
               value={transferToId || accounts[1]?.id || ''}
               onChange={e => setTransferToId(e.target.value)}
             >
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.type})
-                </option>
-              ))}
+              {accounts.length === 0 ? (
+                <option value="">No accounts available</option>
+              ) : (
+                accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.type})
+                  </option>
+                ))
+              )}
             </Select>
           </div>
 
@@ -753,7 +746,11 @@ export function QuickAddModal({
             </Button>
             <Button
               onClick={handleSaveTransfer}
-              disabled={!transferAmount || transferFromId === transferToId}
+              disabled={
+                !transferAmount ||
+                accounts.length < 2 ||
+                (transferFromId || accounts[0]?.id) === (transferToId || (accounts.length > 1 ? accounts[1]?.id : accounts[0]?.id))
+              }
             >
               Execute Transfer
             </Button>

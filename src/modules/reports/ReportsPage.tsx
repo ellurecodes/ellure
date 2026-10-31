@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { calculateIncomeExpense, groupExpensesByCategory } from '../../domain/transactions';
 import { calculateEarningsSummary } from '../../domain/earnings';
-import { evaluateBudgets } from '../../domain/budgets';
+import { calculateFinancialHealth } from '../../domain/budgets';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -32,7 +32,6 @@ export function ReportsPage() {
     earningRecords,
     withdrawals,
     platforms,
-    budgets,
     academicTasks,
     goals,
     habits,
@@ -63,9 +62,9 @@ export function ReportsPage() {
     return calculateEarningsSummary(monthRecords, withdrawals, payoutTransactions, platforms);
   }, [earningRecords, withdrawals, payoutTransactions, platforms, startDate, endDate]);
 
-  const budgetEval = useMemo(() => {
-    return evaluateBudgets(budgets, transactions, selectedMonth);
-  }, [budgets, transactions, selectedMonth]);
+  const financialHealth = useMemo(() => {
+    return calculateFinancialHealth(transactions, cashFlow.netSavingsPaise);
+  }, [transactions, cashFlow]);
 
   // Academic submissions completed this month
   const completedAcademicTasks = useMemo(() => {
@@ -146,9 +145,30 @@ export function ReportsPage() {
           <div className="p-3 bg-muted/40 rounded-lg">
             <span className="text-[10px] text-muted-foreground font-semibold uppercase">Savings Rate</span>
             <div className="text-base font-bold text-foreground mt-0.5">
-              {cashFlow.savingsRatePercentage}%
+              {cashFlow.totalIncomePaise > 0 ? `${cashFlow.savingsRatePercentage}%` : 'Not enough data yet'}
             </div>
           </div>
+        </div>
+
+        {/* Financial Health & Runway Summary (Requirement 6) */}
+        <div className="p-3.5 bg-muted/20 border border-border rounded-lg text-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-foreground uppercase text-[10px] tracking-wider">
+              Financial Health & Spending Runway
+            </span>
+            <Badge variant="outline" className="text-[10px]">
+              {financialHealth.hasEnoughData ? 'Calculated' : 'Insufficient Data'}
+            </Badge>
+          </div>
+          {financialHealth.hasEnoughData ? (
+            <p className="text-muted-foreground">
+              Average daily expense: ₹{(financialHealth.averageDailyExpensePaise / 100).toFixed(0)} • Estimated runway: {financialHealth.runwayDays} days.
+            </p>
+          ) : (
+            <p className="text-muted-foreground italic">
+              Not enough data yet — requires at least 30 days of active expense tracking to compute reliable daily averages and runway projections.
+            </p>
+          )}
         </div>
 
         {/* Earnings Breakdown */}

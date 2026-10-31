@@ -6,9 +6,10 @@ import {
   inspectBackupJson,
   restoreBackup,
   exportTransactionsCsv,
+  parseAndImportCsv,
   checkAndRequestStoragePersistence,
 } from '../../db/backup';
-import { loadSampleData, removeSampleData } from '../../db/seed';
+import { SUGGESTED_STUDENT_CATEGORIES } from '../../db/seed';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input, Select } from '../../components/ui/Input';
@@ -23,10 +24,12 @@ import {
   Upload,
   FileSpreadsheet,
   Trash2,
-  Sparkles,
   AlertTriangle,
   Lock,
   CheckCircle2,
+  X,
+  Plus,
+  Compass,
 } from 'lucide-react';
 import { useUserData } from '../../hooks/useUserData';
 
@@ -46,18 +49,10 @@ export function SettingsPage() {
 
   // Student Settings Form
   const [studentName, setStudentName] = useState(settings?.studentName || currentUser?.displayName || 'Student');
-  const [allowanceAmount, setAllowanceAmount] = useState(
-    ((settings?.monthlyAllowancePaise || 800000) / 100).toString()
-  );
-  const [allowanceResetDay, setAllowanceResetDay] = useState(
-    (settings?.allowanceResetDay || 1).toString()
-  );
 
   useEffect(() => {
     if (settings) {
       setStudentName(settings.studentName);
-      setAllowanceAmount(((settings.monthlyAllowancePaise || 800000) / 100).toString());
-      setAllowanceResetDay((settings.allowanceResetDay || 1).toString());
     }
   }, [settings]);
 
@@ -91,7 +86,6 @@ export function SettingsPage() {
         widgetOrder: [
           'balance_summary',
           'cash_flow',
-          'budget_progress',
           'earnings_glance',
           'today_tasks',
           'habit_tracker',
@@ -101,7 +95,6 @@ export function SettingsPage() {
         widgetVisibility: {
           balance_summary: true,
           cash_flow: true,
-          budget_progress: true,
           earnings_glance: true,
           today_tasks: true,
           habit_tracker: true,
@@ -111,10 +104,10 @@ export function SettingsPage() {
         hasSeenOnboarding: true,
       }),
       studentName: studentName.trim(),
-      monthlyAllowancePaise: Math.round(parseFloat(allowanceAmount || '0') * 100),
-      allowanceResetDay: parseInt(allowanceResetDay) || 1,
+      monthlyAllowancePaise: settings?.monthlyAllowancePaise || 0,
+      allowanceResetDay: settings?.allowanceResetDay || 1,
     });
-    success('Settings saved', 'Profile and allowance updated.');
+    success('Settings saved', 'Profile updated.');
   };
 
   // Restore Modal State
@@ -122,6 +115,10 @@ export function SettingsPage() {
   const [backupJsonText, setBackupJsonText] = useState('');
   const [backupInspection, setBackupInspection] = useState<ReturnType<typeof inspectBackupJson> | null>(null);
   const [restoreMode, setRestoreMode] = useState<'replace' | 'merge'>('replace');
+
+  // CSV Import State
+  const [csvImportErrors, setCsvImportErrors] = useState<string[] | null>(null);
+  const [isCsvErrorModalOpen, setIsCsvErrorModalOpen] = useState(false);
 
   // Danger Zone Clear Data
   const [isClearDataOpen, setIsClearDataOpen] = useState(false);
@@ -206,19 +203,77 @@ export function SettingsPage() {
     success('CSV Exported', 'Transactions CSV downloaded with formula-injection sanitization.');
   };
 
-  // Handle Load Sample Data
-  const handleLoadSample = async () => {
-    await loadSampleData();
-    success('Sample data loaded', 'Demo records added with visible [DEMO SAMPLE DATA] markers.');
+  // Handle CSV Import
+  const handleCsvFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async event => {
+      const text = event.target?.result as string;
+      const res = await parseAndImportCsv(text, currentUser?.id);
+      if (res.errors.length > 0) {
+        setCsvImportErrors(res.errors);
+        setIsCsvErrorModalOpen(true);
+        if (res.importedCount > 0) {
+          success('Partial Import', `Imported ${res.importedCount} rows (${res.errors.length} failed).`);
+        } else {
+          error('CSV Import Failed', `Could not import rows. Please review formatting.`);
+        }
+      } else {
+        success('CSV Imported', `Successfully added ${res.importedCount} transactions (${res.skippedCount} skipped as duplicates).`);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
   };
 
-  // Handle Remove Sample Data
-  const handleRemoveSample = async () => {
-    await removeSampleData();
-    success('Sample data removed', 'All demo preview records removed cleanly.');
+  const [newCatName, setNewCatName] = useState('');
+
+  // Handle Adding Custom Category
+  const handleAddCategory = async () => {
+    const trimmed = newCatName.trim();
+    if (!trimmed) return;
+    const currentCats = settings?.customCategories || [];
+    if (currentCats.includes(trimmed)) {
+      error('Duplicate Category', 'This category already exists.');
+      return;
+    }
+    const updated = [...currentCats, trimmed];
+    if (settings) {
+      await db.settings.update(settings.id, { customCategories: updated });
+      success('Category Added', `Added "${trimmed}" to your categories.`);
+      setNewCatName('');
+    }
   };
 
-  // Handle Complete Data Wipe
+  // Handle Removing Custom Category
+  const handleRemoveCategory = async (cat: string) => {
+    if (!settings) return;
+    const updated = (settings.customCategories || []).filter(c => c !== cat);
+    await db.settings.update(settings.id, { customCategories: updated });
+    success('Category Removed', `Removed "${cat}".`);
+  };
+
+  // Handle Adding Suggested Student Categories
+  const handleAddSuggestedCategories = async () => {
+    if (!settings) return;
+    const currentCats = settings.customCategories || [];
+    const merged = Array.from(new Set([...currentCats, ...SUGGESTED_STUDENT_CATEGORIES]));
+    await db.settings.update(settings.id, { customCategories: merged });
+    success('Categories Added', `Added ${SUGGESTED_STUDENT_CATEGORIES.length} suggested student categories.`);
+  };
+
+  // Handle Toggle Onboarding Checklist
+  const handleToggleChecklist = async () => {
+    if (!settings) return;
+    const currentVal = settings.showOnboardingChecklist !== false;
+    await db.settings.update(settings.id, { showOnboardingChecklist: !currentVal });
+    success('Preference Updated', !currentVal ? 'Getting started checklist enabled on dashboard.' : 'Checklist hidden from dashboard.');
+  };
+
+  // Handle Complete Data Wipe (Restores zero-data state)
   const handleWipeAllData = async () => {
     if (typedConfirmation !== 'DELETE ALL DATA') {
       error('Confirmation mismatch', 'Type "DELETE ALL DATA" exactly to proceed.');
@@ -241,10 +296,22 @@ export function SettingsPage() {
       db.academicTasks.clear(),
       db.habits.clear(),
       db.habitLogs.clear(),
+      db.fitnessMetricLogs.clear(),
       db.goals.clear(),
     ]);
 
-    success('Data deleted', 'All data has been wiped from this device.');
+    if (settings) {
+      await db.settings.update(settings.id, {
+        monthlyAllowancePaise: 0,
+        dailySpendingLimitPaise: 0,
+        weeklyBudgetPaise: 0,
+        customCategories: [],
+        showOnboardingChecklist: true,
+        hasSeenOnboarding: false,
+      });
+    }
+
+    success('Data deleted', 'All data has been wiped. App restored to clean zero-data state.');
     setIsClearDataOpen(false);
     setTypedConfirmation('');
   };
@@ -286,33 +353,18 @@ export function SettingsPage() {
         </div>
       </Card>
 
-      {/* Student Profile & Allowance Settings */}
+      {/* Student Profile Settings */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Student Profile & Allowance Configuration</CardTitle>
-          <CardDescription>Tailor daily spending targets and budget cycles</CardDescription>
+          <CardTitle className="text-sm">Student Profile Configuration</CardTitle>
+          <CardDescription>Update your display name and student identity</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3.5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="Student Name"
               value={studentName}
               onChange={e => setStudentName(e.target.value)}
-            />
-            <Input
-              label="Monthly Allowance (₹)"
-              type="number"
-              step="100"
-              value={allowanceAmount}
-              onChange={e => setAllowanceAmount(e.target.value)}
-            />
-            <Input
-              label="Cycle Reset Day (1-31)"
-              type="number"
-              min="1"
-              max="31"
-              value={allowanceResetDay}
-              onChange={e => setAllowanceResetDay(e.target.value)}
             />
           </div>
           <div className="flex justify-end pt-1">
@@ -397,28 +449,111 @@ export function SettingsPage() {
                 Sanitized against spreadsheet formula injection (=, +, -, @).
               </span>
             </Button>
+
+            <label className="border border-border rounded-xl p-4 flex flex-col items-start space-y-1 cursor-pointer hover:bg-muted/30 transition-colors">
+              <input type="file" accept=".csv" onChange={handleCsvFileChosen} className="hidden" />
+              <div className="flex items-center space-x-2 text-foreground font-semibold text-xs">
+                <Upload className="w-4 h-4 text-sky-500" />
+                <span>Import CSV (Spreadsheet)</span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">
+                Imports transactions with column validation & duplicate check.
+              </span>
+            </label>
           </div>
         </CardContent>
       </Card>
 
-      {/* Demo Sample Data Controls */}
+      {/* Dashboard & Onboarding Preferences */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Preview Sample Data (Optional)</CardTitle>
-          <CardDescription>Populate realistic student records to preview the full application without hardcoded mock data</CardDescription>
+          <CardTitle className="text-sm">Dashboard & Onboarding Preferences</CardTitle>
+          <CardDescription>Configure first-run guidance and onboarding widgets</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="flex items-center justify-between p-3 bg-muted/30 rounded-xl">
+            <div className="flex items-center space-x-3">
+              <Compass className="w-5 h-5 text-primary" />
+              <div>
+                <span className="text-xs font-semibold text-foreground block">
+                  Getting Started Checklist on Dashboard
+                </span>
+                <span className="text-[11px] text-muted-foreground block">
+                  {settings?.showOnboardingChecklist !== false
+                    ? 'Checklist is currently displayed on your Dashboard to guide setup.'
+                    : 'Checklist is hidden from the Dashboard.'}
+                </span>
+              </div>
+            </div>
+            <Button size="sm" variant="outline" onClick={handleToggleChecklist}>
+              {settings?.showOnboardingChecklist !== false ? 'Hide Checklist' : 'Show Checklist'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Expense Categories Management */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Expense Categories Management</CardTitle>
+          <CardDescription>Define and customize your personal ledger categories</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground leading-relaxed">
-            By default LifeOS starts with clean empty states. You can load sample demo records (marked with [DEMO SAMPLE DATA]) and reverse them anytime with a single click.
+            By default, LifeOS starts with zero categories. You can create your own custom categories or populate standard student categories with one click.
           </p>
-          <div className="flex items-center space-x-3">
-            <Button size="sm" variant="outline" onClick={handleLoadSample}>
-              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
-              Load Sample Data
+
+          {/* Add Category Form */}
+          <div className="flex items-center space-x-2">
+            <Input
+              placeholder="e.g. Canteen, Textbooks, Metro Pass..."
+              value={newCatName}
+              onChange={e => setNewCatName(e.target.value)}
+              className="h-8 text-xs max-w-xs"
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddCategory();
+                }
+              }}
+            />
+            <Button size="sm" onClick={handleAddCategory}>
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Add Category
             </Button>
-            <Button size="sm" variant="ghost" onClick={handleRemoveSample}>
-              Remove Sample Data
+            <Button size="sm" variant="outline" onClick={handleAddSuggestedCategories}>
+              Add Suggested Student Categories
             </Button>
+          </div>
+
+          {/* Existing Categories Chips */}
+          <div className="pt-2">
+            <span className="text-[11px] font-semibold uppercase text-muted-foreground block mb-2">
+              Active Categories ({settings?.customCategories?.length || 0})
+            </span>
+            {(settings?.customCategories || []).length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">
+                No categories configured yet. Click "Add Suggested Student Categories" or add one above.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(settings?.customCategories || []).map(cat => (
+                  <span
+                    key={cat}
+                    className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-muted text-foreground border border-border"
+                  >
+                    <span>{cat}</span>
+                    <button
+                      onClick={() => handleRemoveCategory(cat)}
+                      className="text-muted-foreground hover:text-destructive transition-colors ml-1"
+                      title={`Remove ${cat}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -553,6 +688,38 @@ export function SettingsPage() {
               onClick={handleWipeAllData}
             >
               Wipe Everything
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* CSV IMPORT VALIDATION REPORT MODAL */}
+      <Modal
+        isOpen={isCsvErrorModalOpen}
+        onClose={() => setIsCsvErrorModalOpen(false)}
+        title="CSV Import Validation Report"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-700 dark:text-amber-400">
+            <p className="font-semibold mb-1">CSV Format Warnings or Failures:</p>
+            <p className="text-[11px] leading-relaxed">
+              Some or all rows in the selected spreadsheet file could not be imported due to column mismatches, invalid calendar dates, or unknown values.
+            </p>
+          </div>
+
+          <div className="max-h-60 overflow-y-auto space-y-1.5 p-2 bg-muted/40 rounded-xl border border-border text-xs font-mono">
+            {csvImportErrors?.map((err, idx) => (
+              <div key={idx} className="p-1.5 rounded bg-card/60 text-destructive text-[11px] flex items-start space-x-2">
+                <span className="font-bold">•</span>
+                <span>{err}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button size="sm" onClick={() => setIsCsvErrorModalOpen(false)}>
+              Close Report
             </Button>
           </div>
         </div>
